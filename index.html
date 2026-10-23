@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en" data-scene="twilight">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Study Haven</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@600&family=JetBrains+Mono:wght@500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+</head>
+<body>
+  <!-- the stage: one full-screen scene, everything else floats on it -->
+  <div class="bg" aria-hidden="true"><div class="bg-photo" id="bg-photo"></div><div class="grain"></div></div>
+  <div class="room-host" id="room-host" hidden></div>
+  <canvas class="viz" id="viz" aria-hidden="true"></canvas>
+  <div class="sticker-stage" id="sticker-stage"></div>
+
+  <header class="topbar">
+    <a class="wordmark" href="#/" id="wordmark">study haven</a>
+    <p class="quote" id="quote"></p>
+  </header>
+
+  <main class="center" id="center"></main>
+
+  <nav class="corner bl" id="bl" aria-label="Tools"></nav>
+  <nav class="corner br" id="br" aria-label="Modes and settings"></nav>
+
+  <section class="pop" id="pop-due" aria-label="Due" hidden></section>
+  <section class="pop" id="pop-together" aria-label="Study together" hidden></section>
+  <section class="pop" id="pop-room" aria-label="Customise room" hidden></section>
+
+  <!-- the music panel stays in the page while closed, so the YouTube player keeps playing -->
+  <section class="pop pop-music closed" id="pop-music" aria-label="Music">
+    <div class="pop-head"><span class="chip-ic" id="music-ic"></span><b>Music</b><span class="spacer"></span><button class="sq sm" data-act="pop-close" aria-label="Close music" id="music-x"></button></div>
+    <div class="now-row">
+      <div class="thumb" id="np-art"></div>
+      <div class="np-meta"><b id="np-title">Nothing playing</b><small id="np-sub">Pick a track or paste a YouTube link</small></div>
+    </div>
+    <div class="np-controls">
+      <button class="sq" data-act="yt-prev" aria-label="Previous" id="np-prev"></button>
+      <button class="sq accent" data-act="yt-toggle" aria-label="Play or pause" id="np-play"></button>
+      <button class="sq" data-act="yt-next" aria-label="Next" id="np-next"></button>
+      <input type="range" id="np-vol" min="0" max="100" value="60" data-input="yt-vol" aria-label="Volume">
+    </div>
+    <div class="yt-frame"><div id="yt-host"></div></div>
+    <div class="err" id="np-err" hidden></div>
+    <form class="row-input" data-form="yt-paste"><input placeholder="Paste a YouTube or YT Music link" aria-label="YouTube link"><button class="pill accent">Play</button></form>
+    <div class="tracks" id="tracks"></div>
+    <div class="mixer" id="mixer"></div>
+  </section>
+
+  <div class="sheet-wrap" id="sheet" hidden>
+    <div class="sheet" role="dialog" aria-modal="true">
+      <div class="sheet-nav" id="sheet-nav"></div>
+      <div class="sheet-body" id="view"></div>
+    </div>
+  </div>
+
+  <div class="modal" id="modal" hidden></div>
+  <div class="toast" id="toast" hidden></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
