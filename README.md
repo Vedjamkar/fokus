@@ -72,7 +72,11 @@ stream (muted YouTube), your own image or video upload, or any image, video or Y
 - GitHub images can also become backgrounds or stickers directly.
 - Save a look to switch back to it in one click.
 
-## Run it
+## Live
+
+https://vedjamkar.github.io/fokus/ (GitHub Pages; every push to `main` updates it in about a minute). Invite links for Study together work from there.
+
+## Run it locally
 
 ```bash
 python3 serve.py
