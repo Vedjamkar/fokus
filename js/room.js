@@ -22,7 +22,7 @@ export async function mountRoom(host, opts) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 1.2;
   host.append(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -70,8 +70,10 @@ export async function mountRoom(host, opts) {
   const accent = () => new THREE.Color(S.accent || '#6c47ff');
 
   // ---------- light
-  const hemi = new THREE.HemisphereLight(0x8f7cff, 0x1a1226, 0.55); scene.add(hemi);
-  const moon = new THREE.DirectionalLight(0xaab8ff, 0.9);
+  const hemi = new THREE.HemisphereLight(0x8f7cff, 0x3a2a40, 0.95); scene.add(hemi);
+  // soft warm fill from the room side so the floor and corners never sink into black
+  const fill = new THREE.DirectionalLight(0xffd9b0, 0.55); fill.position.set(12, 9, 14); scene.add(fill);
+  const moon = new THREE.DirectionalLight(0xaab8ff, 1.15);
   moon.position.set(4, 14, 10); moon.castShadow = true;
   moon.shadow.mapSize.set(2048, 2048); moon.shadow.camera.left = -9; moon.shadow.camera.right = 9; moon.shadow.camera.top = 9; moon.shadow.camera.bottom = -9; moon.shadow.bias = -0.0005; moon.shadow.radius = 4;
   scene.add(moon);
@@ -692,8 +694,9 @@ export async function mountRoom(host, opts) {
     lampOn = on;
     lampLight.intensity = on ? 14 : 0;
     bulb.material.emissiveIntensity = on ? 1.2 : 0;
-    hemi.intensity = on ? 0.55 : 0.32;
-    renderer.toneMappingExposure = on ? 1.05 : 0.85;
+    hemi.intensity = on ? 0.95 : 0.55;
+    fill.intensity = on ? 0.55 : 0.3;
+    renderer.toneMappingExposure = on ? 1.2 : 0.95;
   }
   setLamp(lampOn);
 
