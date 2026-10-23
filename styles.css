@@ -634,3 +634,8 @@ body.in-room.room-bg .bg-photo { filter: none; transform: none; }
 .bd:hover { transform: translateY(-1px); }
 .bd.on { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
 .bd.add { place-items: center; background: var(--panel-2); border: 1.5px dashed var(--muted); color: var(--muted); }
+
+/* room brightness slider in the room's top bar */
+.rh-bright { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; border-radius: 12px; background: var(--btn); color: var(--ink); }
+.rh-bright input { width: 84px; accent-color: var(--accent); }
+@media (max-width: 640px) { .rh-bright input { width: 56px; } }

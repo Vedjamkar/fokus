@@ -36,6 +36,7 @@ const ICONS = {
   shrink: 'M4 14h6v6M10 14l-7 7M20 10h-6V4M14 10l7-7',
   sparkle: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z',
   plus: 'M12 5v14M5 12h14',
+  sun: 'M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   edit: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
   trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
   play: 'M7 4.5v15l12.5-7.5z',
@@ -756,6 +757,7 @@ function roomState() {
     custom: roomCfg(),
     posters: posterSrcs(),
     labels: S.settings.roomLabels ?? true,
+    bright: S.settings.roomBright ?? 1,
   };
 }
 async function ensureRoom() {
@@ -784,6 +786,7 @@ function roomHudHTML() {
       <button class="sq sm" data-act="pop" data-pop="together" title="Study together" aria-label="Study together">${ic('users')}</button>
       <button class="sq sm ${ui.arrange ? 'on' : ''}" data-act="room-arrange" title="Arrange: drag furniture, R to rotate" aria-label="Arrange the room">${ic('move')}</button>
       <button class="sq sm ${ui.pop === 'room' ? 'on' : ''}" data-act="pop" data-pop="room" title="Customise the room" aria-label="Customise the room">${ic('brush')}</button>
+      <label class="rh-bright" title="Room brightness">${ic('sun', 16)}<input type="range" min="0.4" max="1.8" step="0.05" value="${S.settings.roomBright ?? 1}" data-input="room-bright" aria-label="Room brightness"></label>
       <button class="sq sm ${(S.settings.roomLabels ?? true) ? 'on' : ''}" data-act="room-labels" title="Show what each thing opens" aria-label="Toggle labels">${ic('tag')}</button>
       <button class="sq sm" data-act="room-reset" title="Reset the view" aria-label="Reset the view">${ic('reset')}</button>
     </div>
@@ -1774,6 +1777,7 @@ async function uploadFile(r, file) {
   } catch { toast('Couldn’t store the file. The browser may be out of space.'); }
 }
 let noteSave, taskSync;
+let brightSave = 0;
 const INPUTS = {
   'note-src': (el) => {
     const r = S.resources.find((x) => x.id === el.dataset.id);
@@ -1785,6 +1789,7 @@ const INPUTS = {
   't-task': (el) => { T.task = el.value; saveT(); clearTimeout(taskSync); taskSync = setTimeout(() => { room?.update({ task: T.task }); pushPresence(); }, 400); },
   snd: (el) => { S.settings.sounds = { ...(S.settings.sounds || {}), [el.dataset.id]: +el.value }; SND.setVolume(el.dataset.id, +el.value); save(); },
   'tg-name': (el) => { S.settings.userName = el.value; save(); },
+  'room-bright': (el) => { S.settings.roomBright = +el.value; room?.update({ bright: +el.value }); clearTimeout(brightSave); brightSave = setTimeout(save, 300); },
   'rc-name': (el) => { S.settings.room = { ...roomCfg(), petName: el.value }; save(); },
   dim: (el) => { S.settings.dim = +el.value; save(); applyBackground(); },
 };

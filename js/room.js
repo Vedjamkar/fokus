@@ -690,13 +690,16 @@ export async function mountRoom(host, opts) {
     pMat.color.set(w === 'snow' ? 0xffffff : 0xcfe0ff);
   }
   setWeather(weather);
+  // brightness slider (0.4 – 1.8) scales the whole exposure on top of the lamp
+  let bright = S.bright ?? 1;
+  function applyExposure() { renderer.toneMappingExposure = (lampOn ? 1.2 : 0.95) * bright; }
   function setLamp(on) {
     lampOn = on;
     lampLight.intensity = on ? 14 : 0;
     bulb.material.emissiveIntensity = on ? 1.2 : 0;
     hemi.intensity = on ? 0.95 : 0.55;
     fill.intensity = on ? 0.55 : 0.3;
-    renderer.toneMappingExposure = on ? 1.2 : 0.95;
+    applyExposure();
   }
   setLamp(lampOn);
 
@@ -993,6 +996,7 @@ export async function mountRoom(host, opts) {
       if (next.custom && JSON.stringify(next.custom) !== JSON.stringify(C)) { const relayout = JSON.stringify(next.custom.layout) !== JSON.stringify(C.layout); C = next.custom; applyCustom(); if (relayout) applyLayout(); }
       if (next.weather && next.weather !== weather) setWeather(next.weather);
       if ('lampOn' in next && next.lampOn !== lampOn) setLamp(next.lampOn);
+      if ('bright' in next) { bright = next.bright; applyExposure(); }
     },
     setFriends,
     say(text) { if (!cat.visible) return false; say(text); if (catMode === 'sleep') { catMode = 'idle'; catPoke = clockT.getElapsedTime(); } return true; },
