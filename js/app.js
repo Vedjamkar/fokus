@@ -38,6 +38,7 @@ const ICONS = {
   shrink: 'M4 14h6v6M10 14l-7 7M20 10h-6V4M14 10l7-7',
   sparkle: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z',
   plus: 'M12 5v14M5 12h14',
+  more: 'M5.5 12h.5M11.75 12h.5M18 12h.5',
   sun: 'M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   edit: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
   trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
@@ -371,7 +372,7 @@ function brHTML() {
     <div class="seg" role="tablist" aria-label="Mode">${modes.map(([k, icn, l]) => `<button role="tab" class="${ui.mode === k ? 'on' : ''}" data-act="mode" data-mode="${k}" aria-label="${l} mode" title="${l}">${ic(icn)}<span class="lbl">${l}</span></button>`).join('')}</div>
     <button class="sq sm ${ui.tray ? 'on' : ''}" data-act="tray" aria-label="Stickers" title="Stickers">${ic('sparkle')}</button>
     <button class="sq sm" data-act="go" data-href="#/settings" aria-label="Settings" title="Settings">${ic('gear')}</button>
-    <button class="sq sm" data-act="fullscreen" aria-label="Full screen" title="Full screen">${ic(document.fullscreenElement ? 'shrink' : 'expand')}</button>`;
+    ${document.fullscreenEnabled ? `<button class="sq sm" data-act="fullscreen" aria-label="Full screen" title="Full screen">${ic(document.fullscreenElement ? 'shrink' : 'expand')}</button>` : ''}`;
 }
 
 // ---------------------------------------------------------------- popovers
@@ -760,7 +761,7 @@ function roomState() {
     posters: posterSrcs(),
     gifts: S.gifts || [],
     giftsPending: S.giftsPending || [],
-    labels: S.settings.roomLabels ?? true,
+    labels: S.settings.roomLabels ?? !touchScreen(),
     bright: S.settings.roomBright ?? 1,
   };
 }
@@ -783,18 +784,28 @@ async function ensureRoom() {
   } finally { note.remove(); roomLoading = null; }
 }
 function hideRoom() { roomHost.hidden = true; room?.pause(true); if (ui.arrange) { ui.arrange = false; room?.setArrange(false); } }
+const touchScreen = () => matchMedia('(pointer: coarse)').matches;
 function roomHudHTML() {
-  return `<div style="display:flex;flex-direction:column;align-items:center"><div class="room-hud">
+  const touch = touchScreen();
+  const hint = ui.arrange
+    ? (touch ? 'Arranging · drag furniture around · tap ↻ to turn what you last moved' : 'Arranging · drag furniture around · press R to rotate · click the move button when you’re done')
+    : (touch ? 'Drag to look around · pinch to zoom · tap anything in the room' : 'Drag to look around · scroll to zoom · click anything in the room');
+  // on phones the tools fold behind the ⋯ button so the room isn't hidden behind three rows of buttons
+  return `<div style="display:flex;flex-direction:column;align-items:center"><div class="room-hud ${ui.hudOpen ? 'open' : ''}">
       <div class="rh-timer"><small data-t="lbl-room">${MODE_LABEL[T.mode]}</small><b data-t="mini">${mmss(leftSec())}</b><button class="sq sm" data-act="t-toggle" data-t="btn" aria-label="Start or pause">${ic(T.running ? 'pause' : 'play')}</button></div>
       <input class="rh-task" data-input="t-task" value="${esc(T.task || '')}" placeholder="What are you working on?" aria-label="What you’re working on">
-      <button class="sq sm" data-act="pop" data-pop="together" title="Study together" aria-label="Study together">${ic('users')}</button>
-      <button class="sq sm ${ui.arrange ? 'on' : ''}" data-act="room-arrange" title="Arrange: drag furniture, R to rotate" aria-label="Arrange the room">${ic('move')}</button>
-      <button class="sq sm ${ui.pop === 'room' ? 'on' : ''}" data-act="pop" data-pop="room" title="Customise the room" aria-label="Customise the room">${ic('brush')}</button>
-      <label class="rh-bright" title="Room brightness">${ic('sun', 16)}<input type="range" min="0.4" max="1.8" step="0.05" value="${S.settings.roomBright ?? 1}" data-input="room-bright" aria-label="Room brightness"></label>
-      <button class="sq sm ${(S.settings.roomLabels ?? true) ? 'on' : ''}" data-act="room-labels" title="Show what each thing opens" aria-label="Toggle labels">${ic('tag')}</button>
-      <button class="sq sm" data-act="room-reset" title="Reset the view" aria-label="Reset the view">${ic('reset')}</button>
+      ${ui.arrange && touch ? `<button class="sq sm accent" data-act="room-rotate" title="Turn what you last moved" aria-label="Turn what you last moved">${ic('reset')}</button>` : ''}
+      <button class="sq sm rh-more ${ui.hudOpen ? 'on' : ''}" data-act="rh-more" aria-expanded="${!!ui.hudOpen}" aria-label="More room tools">${ic('more')}</button>
+      <div class="rh-tools">
+        <button class="sq sm" data-act="pop" data-pop="together" title="Study together" aria-label="Study together">${ic('users')}</button>
+        <button class="sq sm ${ui.arrange ? 'on' : ''}" data-act="room-arrange" title="Arrange: drag furniture, R to rotate" aria-label="Arrange the room">${ic('move')}</button>
+        <button class="sq sm ${ui.pop === 'room' ? 'on' : ''}" data-act="pop" data-pop="room" title="Customise the room" aria-label="Customise the room">${ic('brush')}</button>
+        <label class="rh-bright" title="Room brightness">${ic('sun', 16)}<input type="range" min="0.4" max="1.8" step="0.05" value="${S.settings.roomBright ?? 1}" data-input="room-bright" aria-label="Room brightness"></label>
+        <button class="sq sm ${(S.settings.roomLabels ?? !touch) ? 'on' : ''}" data-act="room-labels" title="Show what each thing opens" aria-label="Toggle labels">${ic('tag')}</button>
+        <button class="sq sm" data-act="room-reset" title="Reset the view" aria-label="Reset the view">${ic('reset')}</button>
+      </div>
     </div>
-    ${TGM.TG.status === 'on' && !ui.arrange ? actBarHTML() : `<p class="room-hint">${ui.arrange ? 'Arranging · drag furniture around · press R to rotate · click the move button when you’re done' : 'Drag to look around · scroll to zoom · click anything in the room'}</p>`}</div>`;
+    ${TGM.TG.status === 'on' && !ui.arrange ? actBarHTML() : `<p class="room-hint">${hint}</p>`}</div>`;
 }
 function roomPick(id, data) {
   const go = (h) => { location.hash = h; };
@@ -859,8 +870,10 @@ Object.assign(ACTS_EXTRA, {
 });
 const ROOM_ACTS = {
   'room-reset': () => room?.resetView(),
+  'rh-more': (el) => { ui.hudOpen = !ui.hudOpen; el.closest('.room-hud').classList.toggle('open', ui.hudOpen); el.classList.toggle('on', ui.hudOpen); el.setAttribute('aria-expanded', ui.hudOpen); },
+  'room-rotate': () => { if (!room?.rotateLast()) toast('Drag something first, then tap ↻ to turn it'); },
   'room-arrange': () => { ui.arrange = !ui.arrange; room?.setArrange(ui.arrange); center.innerHTML = roomHudHTML(); if (ui.arrange) toast('Drag furniture to move it · R rotates'); },
-  'room-labels': (el) => { S.settings.roomLabels = !(S.settings.roomLabels ?? true); save(); room?.setLabels(S.settings.roomLabels); el.classList.toggle('on', S.settings.roomLabels); },
+  'room-labels': (el) => { S.settings.roomLabels = !(S.settings.roomLabels ?? !touchScreen()); save(); room?.setLabels(S.settings.roomLabels); el.classList.toggle('on', S.settings.roomLabels); },
   'tg-create': () => { const me = meMember(); TGM.create(me); },
   'tg-leave': () => { TGM.leave(); },
   'tg-gift': () => giveGift(false),
@@ -982,7 +995,7 @@ function characterHTML() {
     <div class="char-row"><small>Skin</small><div class="chips">${sw('skin', AV.SKINS, L.skin)}</div></div>
     <div class="char-row"><small>Hair</small><div class="vis-grid char-grid">${AV.HAIRS.map(([k, l]) => tile('hair', k, l)).join('')}</div></div>
     <div class="char-row"><small>Hair colour</small><div class="chips">${sw('hairColor', AV.HAIR_COLORS, L.hairColor)}</div></div>
-    <div class="char-row"><small>Outfit</small><div class="chips">${sw('outfit', [S.settings.accent || '#6c47ff', ...AV.OUTFITS.filter((h) => h !== S.settings.accent)], L.outfit)}</div></div>
+    <div class="char-row"><small>Outfit</small><div class="chips">${sw('outfit', [...new Set([(S.settings.accent || '#6c47ff').toLowerCase(), ...AV.OUTFITS])], L.outfit.toLowerCase())}</div></div>
     <div class="char-row"><small>Extra</small><div class="vis-grid char-grid">${AV.EXTRAS.map(([k, l]) => tile('extra', k, l)).join('')}</div></div>
   </div>`;
 }

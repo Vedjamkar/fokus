@@ -17,7 +17,9 @@ const LABELS = {
 export async function mountRoom(host, opts) {
   const W = () => host.clientWidth, H = () => host.clientHeight;
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+  // phones: fewer pixels and smaller shadows keep the room smooth and kinder to the battery
+  const phone = matchMedia('(pointer: coarse)').matches && Math.min(innerWidth, innerHeight) < 820;
+  renderer.setPixelRatio(Math.min(phone ? 1.5 : 2, devicePixelRatio));
   renderer.setSize(W(), H());
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -38,6 +40,20 @@ export async function mountRoom(host, opts) {
   controls.minAzimuthAngle = 0.12; controls.maxAzimuthAngle = 1.45;
   controls.update();
   const home = { pos: camera.position.clone(), target: controls.target.clone() };
+  // On a tall phone screen the default framing crops the room, so widen the lens a little and step back
+  // until the whole room fits across. Wide screens keep the original view.
+  const HOME_DIR = home.pos.clone().sub(home.target).normalize(), HOME_DIST = home.pos.distanceTo(home.target);
+  function fitCamera(move) {
+    const a = W() / H();
+    camera.fov = a < 0.8 ? 36 : 28;
+    const half = Math.atan(Math.tan((camera.fov * Math.PI) / 360) * a);
+    const dist = Math.max(HOME_DIST, 8.2 / Math.tan(half));
+    home.pos.copy(home.target).addScaledVector(HOME_DIR, dist);
+    controls.maxDistance = Math.max(40, dist * 1.35); controls.minDistance = Math.min(13, dist * 0.45);
+    camera.aspect = a; camera.updateProjectionMatrix();
+    if (move) { camera.position.copy(home.pos); controls.target.copy(home.target); controls.update(); }
+  }
+  fitCamera(true);
 
   // ---------- helpers
   const pickables = [];
@@ -76,7 +92,7 @@ export async function mountRoom(host, opts) {
   const fill = new THREE.DirectionalLight(0xffd9b0, 0.55); fill.position.set(12, 9, 14); scene.add(fill);
   const moon = new THREE.DirectionalLight(0xaab8ff, 1.15);
   moon.position.set(4, 14, 10); moon.castShadow = true;
-  moon.shadow.mapSize.set(2048, 2048); moon.shadow.camera.left = -9; moon.shadow.camera.right = 9; moon.shadow.camera.top = 9; moon.shadow.camera.bottom = -9; moon.shadow.bias = -0.0005; moon.shadow.radius = 4;
+  moon.shadow.mapSize.set(phone ? 1024 : 2048, phone ? 1024 : 2048); moon.shadow.camera.left = -9; moon.shadow.camera.right = 9; moon.shadow.camera.top = 9; moon.shadow.camera.bottom = -9; moon.shadow.bias = -0.0005; moon.shadow.radius = 4;
   scene.add(moon);
   const windowGlow = new THREE.PointLight(0x9fb4ff, 6, 9, 2); at(windowGlow, 0, 4.4, -3.8); scene.add(windowGlow);
 
@@ -1035,9 +1051,11 @@ export async function mountRoom(host, opts) {
     if (g === rugG) pushFriendsRef?.();
     return true;
   };
+  let lastMoved = null; // what the rotate button turns on touch screens, where there's no R key
+  function rotateLast() { const g = lastMoved; if (!g || DRAG.get(g) !== 'floor') return false; g.rotation.y += Math.PI / 2; bounce(g); saveLayout(g); return true; }
   function endDrag() {
     if (!dragging) return;
-    const g = dragging.g; dragging = null; controls.enabled = true;
+    const g = dragging.g; dragging = null; controls.enabled = true; lastMoved = g;
     saveLayout(g);
   }
   function saveLayout(g) {
@@ -1223,7 +1241,13 @@ export async function mountRoom(host, opts) {
   }
   raf = requestAnimationFrame(frame);
 
-  const onResize = () => { camera.aspect = W() / H(); camera.updateProjectionMatrix(); renderer.setSize(W(), H()); };
+  let lastAspect = W() / H();
+  const onResize = () => {
+    const a = W() / H();
+    // turning the phone round re-frames the room; small resizes keep where you were looking
+    fitCamera((a < 1) !== (lastAspect < 1)); lastAspect = a;
+    renderer.setSize(W(), H());
+  };
   addEventListener('resize', onResize);
   const onVis = () => { running = !document.hidden; last = performance.now(); };
   document.addEventListener('visibilitychange', onVis);
@@ -1257,6 +1281,7 @@ export async function mountRoom(host, opts) {
     setArrange(on) { arrange = on; setGlow(null, false); hovered = null; tip.hidden = true; if (!on) endDrag(); },
     onRugMove(fn) { pushFriendsRef = fn; },
     pause(p) { running = !p; last = performance.now(); },
+    rotateLast,
     resetView() { camera.position.copy(home.pos); controls.target.copy(home.target); controls.update(); },
     get weather() { return weather; },
     destroy() {
