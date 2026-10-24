@@ -76,6 +76,8 @@ stream (muted YouTube), your own image or video upload, or any image, video or Y
 
 https://vedjamkar.github.io/fokus/ (GitHub Pages; every push to `main` updates it in about a minute). Invite links for Study together work from there.
 
+Open copies of the app check `version.json` every few minutes and refresh themselves when it changes. Run `./release.sh` before committing a change so everyone picks it up.
+
 ## Run it locally
 
 ```bash

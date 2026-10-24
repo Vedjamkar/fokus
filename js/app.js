@@ -6,6 +6,7 @@ import { renderNote, toggleTask } from './md.js';
 import * as YT from './player.js';
 import * as SND from './sounds.js';
 import * as VIZ from './visualiser.js';
+import { VERSION } from './version.js';
 import * as TGM from './together.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -1867,6 +1868,29 @@ view.addEventListener('scroll', () => { const l = $('#sticker-layer', view); if 
 Object.assign(ACTS, ACTS_EXTRA, ROOM_ACTS);
 Object.assign(CHANGES, CHANGES_EXTRA);
 const VIEWS = { studio: studioView, today: todayView, subjects: subjectsView, subject: subjectView, library: libraryView, resource: resourceView, calendar: calendarView, courses: coursesView, settings: settingsView };
+// ---------------------------------------------------------------- updates
+// GitHub Pages lets browsers keep files for 10 minutes, so friends could end up on different
+// versions. When version.json online is newer than this copy, re-download every file into the
+// browser cache and reload, so everyone runs the same thing.
+const APP_FILES = ['./', 'index.html', 'styles.css', 'version.json', ...['app', 'store', 'md', 'player', 'sounds', 'together', 'room', 'visualiser', 'version'].map((f) => `js/${f}.js`)];
+let updating = false;
+async function checkForUpdate() {
+  if (updating || location.hostname === 'localhost') return;
+  try {
+    const { v } = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' }).then((r) => r.json());
+    if (!v || v === VERSION) return;
+    updating = true;
+    // already reloaded once for this version and still old: the browser kept its cache, so ask instead of looping
+    if (sessionStorage.getItem('fokus:updatedTo') === v) return toast('A new version of FOKUS is out. Press Cmd+Shift+R (Ctrl+Shift+R) to load it.');
+    sessionStorage.setItem('fokus:updatedTo', v);
+    toast('Updating FOKUS…');
+    await Promise.all(APP_FILES.map((f) => fetch(f, { cache: 'reload' }).catch(() => {})));
+    location.reload();
+  } catch { /* offline: try again later */ }
+}
+checkForUpdate();
+setInterval(checkForUpdate, 5 * 60_000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
 applySettings();
 SND.setMuted(S.settings.catSounds === false);
 VIZ.mountStage($('#viz'), () => ({ style: S.settings.visualiser || 'bars', hidden: ui.mode === 'room', musicPlaying: YT.P.playing, accent: S.settings.accent || '#6c47ff' }));
