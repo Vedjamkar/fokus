@@ -107,14 +107,14 @@ async function applyBackground() {
   const scene = spec.type === 'scene' ? SC.sceneById(spec.value) : null;
   const root = document.documentElement;
   // the room's backdrop is dimmed and blurred unless you gave it its own, so text there is light
-  root.dataset.ink = ui.mode === 'room' && !S.settings.bg.room ? 'light' : grad ? grad.ink : scene ? scene.ink : 'light';
+  root.dataset.ink = ui.mode === 'room' && !S.settings.bg.room ? 'light' : grad ? grad.ink : scene ? spec.ink || scene.ink : 'light';
   root.style.setProperty('--dim', grad || scene ? 0 : (S.settings.dim ?? 25) / 100);
   const key = JSON.stringify(spec);
   if (key === bgKey) return;
   bgKey = key;
   const host = $('#bg-photo');
   if (bgObjectUrl) { URL.revokeObjectURL(bgObjectUrl); bgObjectUrl = ''; }
-  host.style.background = grad ? grad.css : scene ? `${SC.sceneUrl(scene.id)} center / cover no-repeat ${scene.palette[0]}` : '#0b0a12';
+  host.style.background = grad ? grad.css : scene ? `${SC.sceneUrl(spec)} center / cover no-repeat ${SC.scenePalette(spec)[0]}` : '#0b0a12';
   adaptAccent(spec, key);
   if (grad || scene) { host.innerHTML = ''; return; }
   if (spec.type === 'image') host.innerHTML = `<img src="${esc(spec.value)}" alt="">`;
@@ -141,7 +141,7 @@ async function applyBackground() {
   }
 }
 function bgThumbStyle(spec) {
-  if (spec.type === 'scene') return `background:${SC.sceneUrl(spec.value)} center / cover`;
+  if (spec.type === 'scene') return `background:${SC.sceneUrl(spec)} center / cover`;
   if (spec.type === 'gradient') return `background:${(GRADIENTS.find((g) => g.id === spec.value) || GRADIENTS[0]).css}`;
   if (spec.type === 'css') return `background:${spec.value}`;
   if (spec.type === 'image') return `background-image:url('${esc(spec.value)}')`;
@@ -172,6 +172,7 @@ function bestAccent(hexes) {
   return l < 0.3 ? mixHex(pick, '#ffffff', 0.35) : l > 0.75 ? mixHex(pick, '#000000', 0.35) : pick;
 }
 async function accentOf(spec) {
+  if (isHex(spec.accent)) return spec.accent; // a look from the studio brings its own
   if (spec.type === 'scene') return SC.sceneById(spec.value).accent;
   if (spec.type === 'gradient' || spec.type === 'css') {
     const css = spec.type === 'css' ? spec.value : (GRADIENTS.find((g) => g.id === spec.value) || GRADIENTS[0]).css;
@@ -828,7 +829,7 @@ function roomState() {
     sessions: S.sessions.length,
     musicPlaying: YT.P.playing,
     posterImage: spec.type === 'image' ? spec.value : spec.type === 'youtube' ? `https://i.ytimg.com/vi/${spec.value}/hqdefault.jpg` : '',
-    posterColors: grad ? (grad.css.match(/#[0-9a-f]{6}/gi) || []).slice(0, 4) : scene ? scene.palette.slice(0, 4) : [mixHex('#120c26', accent, 0.2), accent, mixHex(accent, '#ffb36b', 0.5)],
+    posterColors: grad ? (grad.css.match(/#[0-9a-f]{6}/gi) || []).slice(0, 4) : scene ? SC.scenePalette(spec).slice(0, 4) : [mixHex('#120c26', accent, 0.2), accent, mixHex(accent, '#ffb36b', 0.5)],
     weather: S.settings.roomWeather || 'rain',
     lampOn: S.settings.roomLamp ?? true,
     custom: roomCfg(),
@@ -1453,7 +1454,7 @@ function renderMixer() {
 // ---------------------------------------------------------------- aesthetic studio
 // Pictures in → palette out (k-means on a 48×48 sample) → a gradient, an accent and text colour.
 // Pictures can be uploads, links, or images browsed from any public GitHub repo.
-const studio = { imgs: null, palette: [], accent: '', mood: 'night', gh: { owner: '', repo: '', ref: '', path: '', items: null, error: '', loading: false } };
+const studio = { imgs: null, palette: [], accent: '', mood: 'night', form: 'ridges', style: '', gh: { owner: '', repo: '', ref: '', path: '', items: null, error: '', loading: false } };
 const GH_EXAMPLES = [['D3Ext/aesthetic-wallpapers', 'images'], ['dharmx/walls', ''], ['FrenzyExists/wallpapers', ''], ['linuxdotexe/nordic-wallpapers', '']];
 const IMG_RE = /\.(png|jpe?g|gif|webp|avif|svg)$/i;
 const toHex = (r, g, b) => `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
@@ -1505,12 +1506,21 @@ async function analyse() {
   const score = (h) => satOf(h) * (1 - Math.abs(lumOf(h) - 0.55));
   studio.accent = [...studio.palette].sort((a, b) => score(b) - score(a))[0] || '';
 }
+// what the studio makes: a painted scene in your pictures' colours (or the old gradient), its accent,
+// and a style that suits it
 function studioTheme() {
   const pal = studio.palette;
   if (pal.length < 2) return null;
   const byLum = [...pal].sort((a, b) => lumOf(a) - lumOf(b));
   const darkest = byLum[0], brightest = byLum[byLum.length - 1];
   const accent = studio.accent || pal[0];
+  // keep the UI accent readable: pull very dark or very light picks toward the middle
+  const l = lumOf(accent);
+  const uiAccent = l < 0.3 ? mixHex(accent, '#ffffff', 0.35) : l > 0.75 ? mixHex(accent, '#000000', 0.35) : accent;
+  if (studio.form !== 'gradient') {
+    const sc = SC.sceneColors(studio.form, pal, accent, studio.mood === 'night');
+    return { spec: { type: 'scene', value: studio.form, colors: sc.colors, ink: sc.ink, accent: uiAccent, label: `${SC.sceneById(studio.form).name}, your colours` }, ink: sc.ink, accent: uiAccent };
+  }
   const second = pal.filter((h) => ![darkest, brightest, accent].includes(h)).sort((a, b) => satOf(b) - satOf(a))[0] || brightest;
   let css, ink;
   if (studio.mood === 'day') {
@@ -1522,11 +1532,18 @@ function studioTheme() {
     css = `radial-gradient(120% 90% at 100% 100%, ${brightest} 0%, ${second} 24%, ${second}00 56%), radial-gradient(90% 80% at 42% 62%, ${accent} 0%, ${accent}00 72%), linear-gradient(160deg, ${base} 0%, ${mixHex(base, accent, 0.3)} 50%, ${mixHex(accent, base, 0.3)} 100%)`;
     ink = 'light';
   }
-  // keep the UI accent readable: pull very dark or very light picks toward the middle
-  const l = lumOf(accent);
-  const uiAccent = l < 0.3 ? mixHex(accent, '#ffffff', 0.35) : l > 0.75 ? mixHex(accent, '#000000', 0.35) : accent;
-  return { css, ink, accent: uiAccent };
+  return { spec: { type: 'css', value: css, ink, accent: uiAccent, label: 'Studio gradient' }, ink, accent: uiAccent };
 }
+// a style that suits the palette: glowing hardware for saturated nights, print for loud colour,
+// paper for warm light, bare type for soft pale ones
+function suggestStyle() {
+  const pal = studio.palette;
+  if (!pal.length) return 'paper';
+  const L = pal.reduce((a, h) => a + lumOf(h), 0) / pal.length, Sat = pal.reduce((a, h) => a + satOf(h), 0) / pal.length;
+  if (studio.mood === 'night' || studio.form === 'tide') return Sat > 0.42 ? 'radio' : 'glass';
+  return Sat > 0.5 ? 'zine' : L > 0.72 && Sat < 0.25 ? 'quiet' : 'paper';
+}
+const studioStyle = () => studio.style || suggestStyle();
 function applyEverywhere(spec) { S.settings.bg = { home: spec, focus: spec, ambient: spec }; save(); render(); }
 
 function studioView() {
@@ -1563,21 +1580,23 @@ function studioView() {
       </div>
       <div class="sec" style="position:sticky;top:0">
         <h2>3 · Your aesthetic</h2>
-        <div class="bg-preview" style="${th ? `background:${th.css}` : 'background:var(--panel-2)'};color:${th?.ink === 'dark' ? '#111' : '#fff'}"><span class="num">${clockStr()}</span>${th ? `<small style="background:${th.accent};color:${inkFor(th.accent)}">Accent</small>` : ''}</div>
+        <div class="bg-preview sd studio-prev" data-style="${studioStyle()}" data-ink="${th?.ink || 'light'}" style="${th ? bgThumbStyle(th.spec) : 'background:var(--panel-2)'};--accent:${th?.accent || 'var(--accent)'};--accent-ink:${th ? inkFor(th.accent) : '#fff'}"><span class="c num">${clockStr()}</span>${th ? '<span class="b"><i></i><i></i><i></i></span>' : ''}</div>
         ${studio.palette.length ? `<div class="palette">${studio.palette.map((h) => `<div><button class="${h === studio.accent ? 'on' : ''}" style="background:${h}" data-act="studio-accent" data-h="${h}" aria-label="Use ${h} as accent"></button><small>${h}</small></div>`).join('')}</div>
-          <p class="muted" style="margin:0;font-size:13px">Click a colour to make it the accent.</p>` : `<div class="empty">${imgs.length ? 'Reading colours…' : 'Add a picture to get a palette.'}</div>`}
-        <div class="seg-tabs"><button class="${studio.mood === 'night' ? 'on' : ''}" data-act="studio-mood" data-m="night">Night</button><button class="${studio.mood === 'day' ? 'on' : ''}" data-act="studio-mood" data-m="day">Day</button></div>
+          <p class="muted" style="margin:0;font-size:13px">Click a colour to make it the accent (and the sun, in Dusk ridges).</p>` : `<div class="empty">${imgs.length ? 'Reading colours…' : 'Add a picture to get a palette.'}</div>`}
+        <div class="field">Background<div class="seg-tabs">${[...SC.SCENES.map((x) => [x.id, x.name]), ['gradient', 'Gradient']].map(([k, l]) => `<button class="${studio.form === k ? 'on' : ''}" data-act="studio-form" data-v="${k}">${l}</button>`).join('')}</div></div>
+        ${studio.form === 'tide' ? '' : `<div class="field">Mood<div class="seg-tabs"><button class="${studio.mood === 'night' ? 'on' : ''}" data-act="studio-mood" data-m="night">Night</button><button class="${studio.mood === 'day' ? 'on' : ''}" data-act="studio-mood" data-m="day">Day</button></div></div>`}
+        <div class="field">Style<div class="chips">${STYLES.map((x) => `<button class="chip ${studioStyle() === x.id ? 'on' : ''}" data-act="studio-style" data-v="${x.id}" aria-pressed="${studioStyle() === x.id}">${x.name}${x.id === suggestStyle() ? ' · suits it' : ''}</button>`).join('')}</div></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn primary" data-act="studio-apply" ${th ? '' : 'disabled'}>Apply theme</button>
+          <button class="btn primary" data-act="studio-apply" ${th ? '' : 'disabled'}>Use this look</button>
           <button class="btn" data-act="studio-accent-only" ${th ? '' : 'disabled'}>Accent only</button>
           <button class="btn" data-act="studio-save">Save current look</button>
         </div>
       </div>
     </div>
     <div class="sec"><h2>Saved aesthetics</h2>
-      ${(S.aesthetics || []).length ? `<div class="saved-grid">${S.aesthetics.map((a) => `<div class="saved-card"><div class="im" style="${bgThumbStyle(a.bg)};color:${a.bg.ink === 'dark' ? '#111' : '#fff'}">${clockStr()}</div>
-        <div class="row"><span class="dot" style="background:${esc(a.accent || '#6c47ff')}"></span><b>${esc(a.name)}</b><button class="btn" data-act="aes-apply" data-id="${a.id}">Apply</button><button class="icon-btn" data-act="aes-del" data-id="${a.id}" aria-label="Delete">${ic('trash')}</button></div></div>`).join('')}</div>`
-        : '<div class="empty">Save a look to switch back to it in one click: background, accent and font together.</div>'}
+      ${(S.aesthetics || []).length ? `<div class="saved-grid">${S.aesthetics.map((a) => `<div class="saved-card"><div class="im sd" data-style="${esc(a.style || 'glass')}" data-ink="${a.bg.ink || (a.bg.type === 'scene' ? SC.sceneById(a.bg.value).ink : 'light')}" style="${bgThumbStyle(a.bg)};color:var(--ink);font-family:var(--f-display)">${clockStr()}</div>
+        <div class="row"><span class="dot" style="background:${esc(a.accent || '#6c47ff')}"></span><b>${esc(a.name)}${a.style ? ` <small class="muted" style="font-weight:500">${esc(STYLES.find((x) => x.id === a.style)?.name || '')}</small>` : ''}</b><button class="btn" data-act="aes-apply" data-id="${a.id}">Apply</button><button class="icon-btn" data-act="aes-del" data-id="${a.id}" aria-label="Delete">${ic('trash')}</button></div></div>`).join('')}</div>`
+        : '<div class="empty">Save a look to switch back to it in one click: background, style, accent and font together.</div>'}
     </div>
   </div>`;
 }
@@ -1613,7 +1632,9 @@ Object.assign(ACTS_EXTRA, {
   'studio-usebg': async (el) => { const im = (await studioImgs())[+el.dataset.i]; applyEverywhere(im.fileId ? { type: 'file', value: im.fileId, label: im.name } : { type: 'image', value: im.src, label: im.name }); toast('Background set'); },
   'studio-accent': (el) => { studio.accent = el.dataset.h; render(); },
   'studio-mood': (el) => { studio.mood = el.dataset.m; render(); },
-  'studio-apply': () => { const th = studioTheme(); if (!th) return; S.settings.accent = th.accent; S.settings.accentMode = 'manual'; applySettings(); applyEverywhere({ type: 'css', value: th.css, ink: th.ink, label: 'Studio gradient' }); toast('Theme applied'); },
+  'studio-apply': () => { const th = studioTheme(); if (!th) return; S.settings.accentMode = 'auto'; S.settings.style = studioStyle(); S.settings.styleChosen = true; applySettings(); applyEverywhere(th.spec); toast('Look applied everywhere'); },
+  'studio-form': (el) => { studio.form = el.dataset.v; render(); },
+  'studio-style': (el) => { studio.style = el.dataset.v; render(); },
   'studio-accent-only': () => { const th = studioTheme(); if (!th) return; S.settings.accent = th.accent; S.settings.accentMode = 'manual'; save(); applySettings(); render(); },
   'studio-save': () => openForm('Save this look', [{ k: 'name', label: 'Name', required: true, placeholder: 'e.g. Rainy library' }], (v) => {
     S.aesthetics ||= [];
@@ -1654,7 +1675,7 @@ function settingsView() {
   const cur = st.bgSame ? st.bg.home : st.bg[tab];
   const isOn = (spec) => cur && cur.type === spec.type && String(cur.value) === String(spec.value);
   const card = (spec, name, thumbStyle, sub = '', badge = '') => `<button class="lib-card ${isOn(spec) ? 'on' : ''}" data-act="bg-pick" data-spec="${esc(JSON.stringify(spec))}"><span class="im" style="${thumbStyle}">${badge ? `<span class="badge">${badge}</span>` : ''}</span>${esc(name)}${sub ? `<small>${esc(sub)}</small>` : ''}</button>`;
-  const curName = cur.type === 'scene' ? SC.sceneById(cur.value).name : cur.type === 'css' ? (cur.label || 'Studio gradient') : cur.type === 'gradient' ? (GRADIENTS.find((g) => g.id === cur.value)?.name || 'Gradient') : cur.label || ({ image: 'Image link', youtube: 'YouTube video', video: 'Video link', file: 'Your upload' }[cur.type]);
+  const curName = cur.type === 'scene' ? cur.label || SC.sceneById(cur.value).name : cur.type === 'css' ? (cur.label || 'Studio gradient') : cur.type === 'gradient' ? (GRADIENTS.find((g) => g.id === cur.value)?.name || 'Gradient') : cur.label || ({ image: 'Image link', youtube: 'YouTube video', video: 'Video link', file: 'Your upload' }[cur.type]);
   return `<div class="page wide">
     <div class="ph"><h1>Settings</h1><p>Make it yours. Everything saves as you change it.</p></div>
 
@@ -1731,7 +1752,7 @@ function loadStyleFonts(id) {
 function styleCardsHTML() {
   loadStyleFonts('all');
   const spec = bgFor('home');
-  const ink = spec.type === 'scene' ? SC.sceneById(spec.value).ink : spec.type === 'gradient' ? (GRADIENTS.find((g) => g.id === spec.value) || GRADIENTS[0]).ink : spec.type === 'css' ? spec.ink || 'light' : 'light';
+  const ink = spec.type === 'scene' ? spec.ink || SC.sceneById(spec.value).ink : spec.type === 'gradient' ? (GRADIENTS.find((g) => g.id === spec.value) || GRADIENTS[0]).ink : spec.type === 'css' ? spec.ink || 'light' : 'light';
   return `<div class="style-grid">${STYLES.map((x) => `<button class="style-card ${styleOf().id === x.id ? 'on' : ''}" data-act="style" data-v="${x.id}" aria-pressed="${styleOf().id === x.id}">
     <span class="sd" data-style="${x.id}" data-ink="${ink}" style="${bgThumbStyle(spec)}"><span class="w">${esc((S.settings.appName || 'fokus').toLowerCase())}</span><span class="c num">${clockStr()}</span><span class="b"><i></i><i></i><i></i></span></span>
     <b>${x.name}</b><small>${x.note}</small></button>`).join('')}</div>`;

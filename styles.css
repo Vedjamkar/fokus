@@ -885,3 +885,10 @@ body.in-room.room-bg .bg-photo { filter: none; transform: none; }
 [data-style="radio"].sd .c { text-shadow: 0 0 14px color-mix(in srgb, var(--accent) 70%, transparent); letter-spacing: .02em; }
 [data-style="zine"].sd .c { text-shadow: .05em .03em 0 color-mix(in srgb, var(--riso) 75%, transparent); letter-spacing: -.06em; }
 [data-style="paper"].sd .c, [data-style="quiet"].sd .w { font-style: italic; }
+/* the studio's preview: your painted background, shown in the style you're trying */
+.studio-prev { color: var(--ink); }
+.studio-prev .c { font: var(--w-display) 64px/1 var(--f-display); letter-spacing: -.03em; }
+.studio-prev .b { position: absolute; left: 12px; right: 12px; bottom: 10px; display: flex; gap: 6px; }
+.studio-prev .b i { width: 26px; height: 26px; border-radius: var(--r-btn); background: var(--btn); border: var(--btn-edge); box-shadow: var(--btn-shadow); backdrop-filter: var(--blur); }
+.studio-prev .b i:last-child { margin-left: auto; width: 54px; background: var(--accent); border: 0; }
+.saved-card .im.sd { font: var(--w-display) 34px var(--f-display); }
