@@ -5,6 +5,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import * as SND from './sounds.js';
 import * as VIZ from './visualiser.js';
+import { lookFor } from './avatar.js';
 
 const LABELS = {
   laptop: 'Notes', shelf: 'Textbooks & slides', book: 'Subject', calendar: 'Calendar', board: 'What’s due',
@@ -601,12 +602,12 @@ export async function mountRoom(host, opts) {
   }
   const hashOf = (str) => [...(str || '?')].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7);
   function buildFriend(f) {
-    const hash = hashOf(f.name);
     const c = new THREE.Color(f.color || '#4fb3a9');
     const g = new THREE.Group();
-    const skin = mat([0xf6d5b8, 0xe9bb92, 0xc98d64, 0x9c6743, 0x6f472c][hash % 5], { roughness: 0.62 });
-    const hairM = mat([0x2b1d14, 0x4a2c1a, 0x16131a, 0x8a5a2b, 0xd9b26a, 0x7a2f3a, 0x3d3a66][(hash >> 3) % 7], { roughness: 0.75 });
-    const shirt = mat(c, { roughness: 0.75 });
+    const look = lookFor(f.name, f.avatar, f.color || '#4fb3a9');
+    const skin = mat(look.skin, { roughness: 0.62 });
+    const hairM = mat(look.hairColor, { roughness: 0.75 });
+    const shirt = mat(look.outfit, { roughness: 0.75 });
     const pants = mat(new THREE.Color(c).lerp(new THREE.Color('#1d1a2b'), 0.7), { roughness: 0.85 });
     const shoe = mat(0xf2ede6, { roughness: 0.6 });
     // armchair: wooden legs, a soft seat and back, rounded arms, all a calm tint of their colour
@@ -648,15 +649,41 @@ export async function mountRoom(host, opts) {
       return e;
     });
     const smile = at(new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.012, 6, 16, Math.PI), eyeM), 0, -0.12, 0.315); smile.rotation.z = Math.PI; head.add(smile);
-    // hair: a cap with a side-swept fringe; some get a bun, some longer hair at the back
-    const cap = at(new THREE.Mesh(new THREE.SphereGeometry(0.36, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.52), hairM), 0, 0.03, -0.04); cap.rotation.x = -0.3; head.add(cap);
-    const fringe = at(new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 12), hairM), (hash % 2 ? 1 : -1) * 0.07, 0.2, 0.18); fringe.scale.set(1.25, 0.42, 0.62); fringe.rotation.z = (hash % 2 ? -1 : 1) * 0.3; head.add(fringe);
-    const style = (hash >> 5) % 3;
-    if (style === 0) head.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 12), hairM), 0, 0.2, -0.3));
-    if (style === 1) { const long = at(new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.25, 6, 16), hairM), 0, -0.18, -0.12); long.scale.set(1.05, 1, 0.7); head.add(long); }
-    // headphones in their colour
-    const band = new THREE.Mesh(new THREE.TorusGeometry(0.37, 0.025, 8, 28, Math.PI), mat(0x2b2838, { roughness: 0.4 })); at(band, 0, 0.02, -0.02); head.add(band);
-    [-1, 1].forEach((sd) => { const cup = at(cyl(0.1, 0.1, 0.08, mat(c, { roughness: 0.4 }), 18), sd * 0.36, 0, 0); cup.rotation.z = Math.PI / 2; head.add(cup); });
+    // hair
+    const sideW = look.side;
+    const capOf = (r, theta) => { const m = at(new THREE.Mesh(new THREE.SphereGeometry(r, 24, 16, 0, Math.PI * 2, 0, Math.PI * theta), hairM), 0, 0.03, -0.04); m.rotation.x = -0.3; head.add(m); return m; };
+    if (look.hair === 'buzz') capOf(0.345, 0.5);
+    else {
+      capOf(0.36, look.hair === 'curly' ? 0.58 : 0.52);
+      const fringe = at(new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 12), hairM), sideW * 0.07, 0.2, 0.18); fringe.scale.set(1.25, 0.42, 0.62); fringe.rotation.z = -sideW * 0.3; head.add(fringe);
+    }
+    if (look.hair === 'bun') head.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 12), hairM), 0, 0.22, -0.3));
+    if (look.hair === 'long') { const long = at(new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.25, 6, 16), hairM), 0, -0.18, -0.12); long.scale.set(1.05, 1, 0.7); head.add(long); }
+    if (look.hair === 'curly') for (let i = 0; i < 9; i++) { const a2 = (i / 9) * Math.PI * 2; head.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), hairM), Math.cos(a2) * 0.32, 0.12 + Math.sin(i * 1.7) * 0.06, Math.sin(a2) * 0.3 - 0.06)); }
+    if (look.hair === 'pigtails') [-1, 1].forEach((sd) => { const pt = at(new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.2, 6, 10), hairM), sd * 0.4, -0.08, -0.1); pt.rotation.z = sd * 0.35; head.add(pt); });
+    // a little extra
+    const outfitC = new THREE.Color(look.outfit);
+    if (look.extra === 'headphones') {
+      const band = new THREE.Mesh(new THREE.TorusGeometry(0.37, 0.025, 8, 28, Math.PI), mat(0x2b2838, { roughness: 0.4 })); at(band, 0, 0.02, -0.02); head.add(band);
+      [-1, 1].forEach((sd) => { const cup = at(cyl(0.1, 0.1, 0.08, mat(outfitC, { roughness: 0.4 }), 18), sd * 0.36, 0, 0); cup.rotation.z = Math.PI / 2; head.add(cup); });
+    }
+    if (look.extra === 'glasses') {
+      const frameMat = mat(0x1d1a2b, { roughness: 0.3, metalness: 0.3 });
+      [-1, 1].forEach((sd) => head.add(at(new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.012, 6, 20), frameMat), sd * 0.12, -0.005, 0.33)));
+      head.add(at(box(0.08, 0.015, 0.015, frameMat, 0), 0, 0.005, 0.34));
+    }
+    if (look.extra === 'beanie') {
+      const bm = mat(outfitC.clone().lerp(new THREE.Color('#ffffff'), 0.15), { roughness: 0.95 });
+      const beanie = at(new THREE.Mesh(new THREE.SphereGeometry(0.375, 24, 14, 0, Math.PI * 2, 0, Math.PI * 0.47), bm), 0, 0.06, -0.03); beanie.rotation.x = -0.2; head.add(beanie);
+      const brim = at(new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.05, 8, 28), bm), 0, 0.1, -0.01); brim.rotation.x = Math.PI / 2 - 0.2; head.add(brim);
+      head.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), mat(0xffffff, { roughness: 1 })), 0, 0.46, -0.1));
+    }
+    if (look.extra === 'bow') {
+      const bowM = mat(0xff7aa2, { roughness: 0.5 });
+      const bow = new THREE.Group(); at(bow, sideW * 0.2, 0.3, 0.05); bow.rotation.z = -sideW * 0.4; head.add(bow);
+      [-1, 1].forEach((sd) => { const lobe = at(new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.13, 10), bowM), sd * 0.07, 0, 0); lobe.rotation.z = sd * Math.PI / 2; bow.add(lobe); });
+      bow.add(new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), bowM));
+    }
     // laptop on their lap, screen facing them
     const lap = new THREE.Group(); at(lap, 0, 0.98, 0.3); lap.rotation.x = -0.08; g.add(lap);
     lap.add(box(0.5, 0.03, 0.34, shell, 0.01));
@@ -674,7 +701,7 @@ export async function mountRoom(host, opts) {
     const keep = new Set();
     list.slice(0, SEAT_OFFSETS.length).forEach((f, i) => {
       keep.add(f.id);
-      const sig = `${f.name}|${f.color}|${f.status}`;
+      const sig = `${f.name}|${f.color}|${f.status}|${JSON.stringify(f.avatar || {})}`;
       let fr = friends.get(f.id);
       if (!fr || fr.sig !== sig) {
         if (fr) { friendGroup.remove(fr.g, fr.label); }

@@ -7,6 +7,7 @@ import * as YT from './player.js';
 import * as SND from './sounds.js';
 import * as VIZ from './visualiser.js';
 import { VERSION } from './version.js';
+import * as AV from './avatar.js';
 import * as TGM from './together.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -950,6 +951,46 @@ function postersHTML() {
     ${studioPics.length ? `<div class="poster-studio">${studioPics.map((im) => `<button data-act="poster-studio" data-url="${esc(im.url)}" style="background-image:url('${esc(im.url)}')" title="Hang this from your studio" aria-label="Hang ${esc(im.name || 'studio image')}"></button>`).join('')}</div>` : ''}
   </div>`;
 }
+// ---------------------------------------------------------------- your character (how friends see you)
+function faceSVG(L, size = 96) {
+  const hc = L.hairColor, sk = L.skin, sd = L.side;
+  const back = L.hair === 'long' ? `<rect x="19" y="34" width="42" height="34" rx="16" fill="${hc}"/>` : '';
+  const tails = L.hair === 'pigtails' ? `<ellipse cx="17" cy="52" rx="6" ry="11" fill="${hc}" transform="rotate(20 17 52)"/><ellipse cx="63" cy="52" rx="6" ry="11" fill="${hc}" transform="rotate(-20 63 52)"/>` : '';
+  const curls = L.hair === 'curly' ? Array.from({ length: 9 }, (_, i) => { const a = Math.PI + (i / 8) * Math.PI; return `<circle cx="${40 + Math.cos(a) * 21}" cy="${42 + Math.sin(a) * 19}" r="7" fill="${hc}"/>`; }).join('') : '';
+  const cap = L.hair === 'buzz' ? `<path d="M21 42a19 19 0 0 1 38 0q-19-8-38 0z" fill="${hc}"/>`
+    : `<path d="M19 46a21 21 0 0 1 42 0q-8-9-21-10q-13 1-21 10z" fill="${hc}"/><ellipse cx="${40 + sd * 6}" cy="29" rx="15" ry="6" fill="${hc}" transform="rotate(${-sd * 14} ${40 + sd * 6} 29)"/>`;
+  const bun = L.hair === 'bun' ? `<circle cx="40" cy="20" r="7" fill="${hc}"/>` : '';
+  const ex = {
+    headphones: `<path d="M18 44a22 22 0 0 1 44 0" stroke="#2b2838" stroke-width="3" fill="none"/><rect x="14" y="40" width="7" height="13" rx="3" fill="${L.outfit}"/><rect x="59" y="40" width="7" height="13" rx="3" fill="${L.outfit}"/>`,
+    glasses: '<circle cx="33" cy="46" r="5.5" fill="none" stroke="#1d1a2b" stroke-width="1.8"/><circle cx="47" cy="46" r="5.5" fill="none" stroke="#1d1a2b" stroke-width="1.8"/><path d="M38.5 46h3" stroke="#1d1a2b" stroke-width="1.8"/>',
+    beanie: `<path d="M18 40a22 21 0 0 1 44 0z" fill="${L.outfit}"/><rect x="17" y="37" width="46" height="7" rx="3.5" fill="${L.outfit}" opacity=".85"/><circle cx="40" cy="17" r="5" fill="#fff"/>`,
+    bow: `<g transform="translate(${40 + sd * 13} 27) rotate(${-sd * 20})"><path d="M0 0l-9-5v10zM0 0l9-5v10z" fill="#ff7aa2"/><circle r="2.4" fill="#ff7aa2"/></g>`,
+    none: '',
+  }[L.extra];
+  return `<svg viewBox="0 0 80 80" width="${size}" height="${size}" aria-hidden="true"><circle cx="40" cy="40" r="40" fill="${mixHex('#1d1a2b', L.outfit, 0.25)}"/>
+    <ellipse cx="40" cy="84" rx="26" ry="20" fill="${L.outfit}"/>${back}${tails}${curls}<circle cx="40" cy="46" r="19" fill="${sk}"/>${cap}${bun}
+    <ellipse cx="33" cy="46" rx="2.3" ry="3" fill="#1d1a2b"/><ellipse cx="47" cy="46" rx="2.3" ry="3" fill="#1d1a2b"/>
+    <circle cx="29" cy="52" r="3" fill="#ff8fa3" opacity=".45"/><circle cx="51" cy="52" r="3" fill="#ff8fa3" opacity=".45"/><path d="M37 54q3 3 6 0" stroke="#1d1a2b" stroke-width="1.6" fill="none" stroke-linecap="round"/>${ex}</svg>`;
+}
+function myLook() { return AV.lookFor(S.settings.userName || 'Someone', S.settings.avatar || {}, S.settings.accent || '#6c47ff'); }
+function characterHTML() {
+  const L = myLook(), av = S.settings.avatar || {};
+  const sw = (k, list, cur) => list.map((h) => `<button class="swatch ${cur === h ? 'on' : ''}" style="background:${h}" data-act="av" data-k="${k}" data-v="${h}" aria-label="${h}"></button>`).join('');
+  const tile = (k, v, label) => { const look = { ...L, [k]: v }; return `<button class="vis ${L[k] === v ? 'on' : ''}" data-act="av" data-k="${k}" data-v="${v}" aria-pressed="${L[k] === v}">${faceSVG(look, 56)}<span>${label}</span></button>`; };
+  return `<div class="rc-sec"><b>Your character</b>
+    <div class="char-top">${faceSVG(L, 88)}<p class="rc-note">This is how friends see you when you study together. Anything you don’t pick comes from your name.${Object.keys(av).length ? ' <button class="linkish" data-act="av-reset">Reset</button>' : ''}</p></div>
+    <div class="char-row"><small>Skin</small><div class="chips">${sw('skin', AV.SKINS, L.skin)}</div></div>
+    <div class="char-row"><small>Hair</small><div class="vis-grid char-grid">${AV.HAIRS.map(([k, l]) => tile('hair', k, l)).join('')}</div></div>
+    <div class="char-row"><small>Hair colour</small><div class="chips">${sw('hairColor', AV.HAIR_COLORS, L.hairColor)}</div></div>
+    <div class="char-row"><small>Outfit</small><div class="chips">${sw('outfit', [S.settings.accent || '#6c47ff', ...AV.OUTFITS.filter((h) => h !== S.settings.accent)], L.outfit)}</div></div>
+    <div class="char-row"><small>Extra</small><div class="vis-grid char-grid">${AV.EXTRAS.map(([k, l]) => tile('extra', k, l)).join('')}</div></div>
+  </div>`;
+}
+Object.assign(ACTS_EXTRA, {
+  av: (el) => { S.settings.avatar = { ...(S.settings.avatar || {}), [el.dataset.k]: el.dataset.v }; save(); popRoom.innerHTML = roomCfgHTML(); pushPresence(); pushFriends(); },
+  'av-reset': () => { S.settings.avatar = {}; save(); popRoom.innerHTML = roomCfgHTML(); pushPresence(); pushFriends(); },
+});
+
 // ---------------------------------------------------------------- room backdrop (what's behind the diorama)
 function setRoomBg(spec) {
   S.settings.bg.room = spec || undefined; save();
@@ -1001,6 +1042,7 @@ function roomCfgHTML() {
   const viewSky = c.time === 'day' ? SKY.day : c.time === 'sunset' ? SKY.sunset : SKY.night;
   return `<div class="pop-head"><span class="chip-ic">${ic('brush')}</span><b>Your room</b><span class="spacer"></span><button class="sq sm" data-act="pop" data-pop="room" aria-label="Close">${ic('x')}</button></div>
   <div class="pop-body" style="gap:16px;padding:16px 18px">
+    ${characterHTML()}
     ${backdropHTML()}
     ${postersHTML()}
     <div class="rc-sec"><b>Window view</b><div class="vis-grid">${Object.entries({ city: 'City', forest: 'Forest', beach: 'Beach', mountains: 'Mountains' }).map(([v, l]) => tile('rc', `data-k="view" data-v="${v}"`, svg(`${svgGrad(`vs-${v}`, viewSky)}<rect width="80" height="50" fill="url(#vs-${v})"/>${VIEW_ART[v]}`), l, c.view === v)).join('')}</div></div>
@@ -1053,7 +1095,8 @@ const myId = (() => { try { let id = sessionStorage.getItem(MEKEY); if (!id) { i
 function meMember() {
   const s = subjectById(T.subjectId);
   return { id: myId, name: S.settings.userName || 'Someone', color: S.settings.accent || '#6c47ff', task: T.task || '', subject: s?.code || s?.name || '',
-    status: T.running ? (T.mode === 'focus' ? 'focus' : 'break') : 'idle', endAt: T.running ? T.endAt : 0, left: T.running ? 0 : T.left };
+    status: T.running ? (T.mode === 'focus' ? 'focus' : 'break') : 'idle', endAt: T.running ? T.endAt : 0, left: T.running ? 0 : T.left,
+    avatar: S.settings.avatar || {} };
 }
 const pushPresence = () => TGM.updateMe(meMember());
 function timerChanged(force) {
@@ -1928,7 +1971,7 @@ const VIEWS = { studio: studioView, today: todayView, subjects: subjectsView, su
 // GitHub Pages lets browsers keep files for 10 minutes, so friends could end up on different
 // versions. When version.json online is newer than this copy, re-download every file into the
 // browser cache and reload, so everyone runs the same thing.
-const APP_FILES = ['./', 'index.html', 'styles.css', 'version.json', 'sw.js', ...['app', 'store', 'md', 'player', 'sounds', 'together', 'room', 'visualiser', 'version'].map((f) => `js/${f}.js`)];
+const APP_FILES = ['./', 'index.html', 'styles.css', 'version.json', 'sw.js', ...['app', 'store', 'md', 'player', 'sounds', 'together', 'room', 'visualiser', 'version', 'avatar'].map((f) => `js/${f}.js`)];
 let updating = false;
 async function checkForUpdate() {
   if (updating || location.hostname === 'localhost') return;
