@@ -57,7 +57,7 @@ A 3D isometric study room you can orbit around. Every object is part of the app:
 
 **Study together** (people icon): create a room and share the code. Friends appear sitting in your study
 room with their live timer and task. You can start a group focus, keep timers in sync, and chat. Rooms
-run through free public MQTT relay servers (EMQX and HiveMQ, both at once), with no accounts, so they work across different networks. Friends need to open the
+run through five free public relay servers at once (two MQTT brokers plus three Nostr relays on the normal web port), with no accounts, so they work across different networks, even ones that block unusual ports. Friends need to open the
 same app, so host it online (e.g. GitHub Pages) and send them the invite link. To try it alone, open a
 second browser window and join your own room.
 

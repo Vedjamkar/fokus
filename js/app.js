@@ -1102,6 +1102,7 @@ function togetherHTML() {
   return `${head}<div class="pop-body" style="gap:12px;padding:14px 16px">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="code-chip">${TG.room}</span>
       <button class="btn" data-act="tg-copy" data-text="${TG.room}">${ic('copy')} Code</button><button class="btn" data-act="tg-copy" data-text="${esc(link)}">${ic('link')} Invite link</button></div>
+    ${(() => { const h = TGM.health(); return `<p class="muted" style="margin:0;font-size:12px" title="${esc(h.servers.map((x) => `${x.name}: ${x.ok ? 'connected' : 'not reachable'}`).join('\n'))}">Connected through ${h.connected} of ${h.total} relay servers${h.connected < 2 ? ' · your network may be blocking some' : ''}</p>`; })()}
     <div class="tg-members">${members.map((m) => `<div class="tg-m"><span class="av" style="background:${esc(m.color)}">${esc((m.name || '?')[0].toUpperCase())}</span>
       <span class="who"><b>${esc(m.name)}${m.id === myId ? ' (you)' : ''}</b><small>${esc([m.subject, m.task].filter(Boolean).join(' · ') || 'No task set')}</small></span>
       <span class="st ${m.status}" data-fclock="${m.id}">${statusText(m)}</span></div>`).join('')}</div>
@@ -1872,7 +1873,7 @@ const VIEWS = { studio: studioView, today: todayView, subjects: subjectsView, su
 // GitHub Pages lets browsers keep files for 10 minutes, so friends could end up on different
 // versions. When version.json online is newer than this copy, re-download every file into the
 // browser cache and reload, so everyone runs the same thing.
-const APP_FILES = ['./', 'index.html', 'styles.css', 'version.json', ...['app', 'store', 'md', 'player', 'sounds', 'together', 'room', 'visualiser', 'version'].map((f) => `js/${f}.js`)];
+const APP_FILES = ['./', 'index.html', 'styles.css', 'version.json', 'sw.js', ...['app', 'store', 'md', 'player', 'sounds', 'together', 'room', 'visualiser', 'version'].map((f) => `js/${f}.js`)];
 let updating = false;
 async function checkForUpdate() {
   if (updating || location.hostname === 'localhost') return;
@@ -1888,6 +1889,7 @@ async function checkForUpdate() {
     location.reload();
   } catch { /* offline: try again later */ }
 }
+if ('serviceWorker' in navigator && location.hostname !== 'localhost') navigator.serviceWorker.register('sw.js').catch(() => {});
 checkForUpdate();
 setInterval(checkForUpdate, 5 * 60_000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
