@@ -8,6 +8,7 @@ import * as SND from './sounds.js';
 import * as VIZ from './visualiser.js';
 import { VERSION } from './version.js';
 import * as AV from './avatar.js';
+import * as SC from './scenes.js';
 import * as TGM from './together.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -98,21 +99,24 @@ const ANIMATED = [
 ].map(([id, name]) => ({ id, name, thumb: `https://i.ytimg.com/vi/${id}/hqdefault.jpg` }));
 
 // the room has its own backdrop when you pick one; otherwise it borrows the home background (blurred)
-const bgFor = (mode) => (mode === 'room' && S.settings.bg.room) || (S.settings.bgSame ? S.settings.bg.home : S.settings.bg[mode === 'room' ? 'home' : mode]) || { type: 'gradient', value: 'twilight' };
+const bgFor = (mode) => (mode === 'room' && S.settings.bg.room) || (S.settings.bgSame ? S.settings.bg.home : S.settings.bg[mode === 'room' ? 'home' : mode]) || { type: 'scene', value: 'ridges' };
 let bgKey = '', bgObjectUrl = '';
 async function applyBackground() {
   const spec = bgFor(ui.mode);
   const grad = spec.type === 'gradient' ? (GRADIENTS.find((g) => g.id === spec.value) || GRADIENTS[0]) : spec.type === 'css' ? { css: spec.value, ink: spec.ink || 'light' } : null;
+  const scene = spec.type === 'scene' ? SC.sceneById(spec.value) : null;
   const root = document.documentElement;
-  root.dataset.ink = grad ? grad.ink : 'light';
-  root.style.setProperty('--dim', grad ? 0 : (S.settings.dim ?? 25) / 100);
+  // the room's backdrop is dimmed and blurred unless you gave it its own, so text there is light
+  root.dataset.ink = ui.mode === 'room' && !S.settings.bg.room ? 'light' : grad ? grad.ink : scene ? scene.ink : 'light';
+  root.style.setProperty('--dim', grad || scene ? 0 : (S.settings.dim ?? 25) / 100);
   const key = JSON.stringify(spec);
   if (key === bgKey) return;
   bgKey = key;
   const host = $('#bg-photo');
   if (bgObjectUrl) { URL.revokeObjectURL(bgObjectUrl); bgObjectUrl = ''; }
-  host.style.background = grad ? grad.css : '#0b0a12';
-  if (grad) { host.innerHTML = ''; return; }
+  host.style.background = grad ? grad.css : scene ? `${SC.sceneUrl(scene.id)} center / cover no-repeat ${scene.palette[0]}` : '#0b0a12';
+  adaptAccent(spec, key);
+  if (grad || scene) { host.innerHTML = ''; return; }
   if (spec.type === 'image') host.innerHTML = `<img src="${esc(spec.value)}" alt="">`;
   else if (spec.type === 'video') host.innerHTML = `<video src="${esc(spec.value)}" autoplay muted loop playsinline></video>`;
   else if (spec.type === 'youtube') {
@@ -137,11 +141,57 @@ async function applyBackground() {
   }
 }
 function bgThumbStyle(spec) {
+  if (spec.type === 'scene') return `background:${SC.sceneUrl(spec.value)} center / cover`;
   if (spec.type === 'gradient') return `background:${(GRADIENTS.find((g) => g.id === spec.value) || GRADIENTS[0]).css}`;
   if (spec.type === 'css') return `background:${spec.value}`;
   if (spec.type === 'image') return `background-image:url('${esc(spec.value)}')`;
   if (spec.type === 'youtube') return `background-image:url('https://i.ytimg.com/vi/${esc(spec.value)}/hqdefault.jpg')`;
   return 'background:#222';
+}
+
+// ---------------------------------------------------------------- adaptive accent
+// The accent comes from the background: a painted scene knows its own, a gradient's colours are read
+// from its CSS, and a photo or video thumbnail is sampled (k-means, then the most colourful mid-tone).
+// This only colours the interface. Your colour for friends and your character stays S.settings.accent.
+const ACCENT_KEY = 'studyhaven:accents';
+const accentCache = (() => { try { return new Map(Object.entries(JSON.parse(localStorage.getItem(ACCENT_KEY)) || {})); } catch { return new Map(); } })();
+let bgAccent = '';
+const isHex = (h) => /^#[0-9a-f]{6}$/i.test(h || '');
+const manualAccent = () => S.settings.accentMode === 'manual' && isHex(S.settings.accent);
+function effectiveAccent() { return manualAccent() ? S.settings.accent : bgAccent || (isHex(S.settings.accent) ? S.settings.accent : '#c2593b'); }
+function applyAccent() {
+  const a = effectiveAccent(), rs = document.documentElement.style;
+  rs.setProperty('--accent', a); rs.setProperty('--accent-ink', inkFor(a));
+}
+function bestAccent(hexes) {
+  const score = (h) => satOf(h) * (1 - Math.abs(lumOf(h) - 0.55)) + 0.02;
+  const pick = [...hexes].sort((a, b) => score(b) - score(a))[0];
+  if (!pick) return '';
+  // keep it readable on both the scene and the panels: pull very dark or very light picks toward the middle
+  const l = lumOf(pick);
+  return l < 0.3 ? mixHex(pick, '#ffffff', 0.35) : l > 0.75 ? mixHex(pick, '#000000', 0.35) : pick;
+}
+async function accentOf(spec) {
+  if (spec.type === 'scene') return SC.sceneById(spec.value).accent;
+  if (spec.type === 'gradient' || spec.type === 'css') {
+    const css = spec.type === 'css' ? spec.value : (GRADIENTS.find((g) => g.id === spec.value) || GRADIENTS[0]).css;
+    return bestAccent(css.match(/#[0-9a-f]{6}/gi) || []);
+  }
+  const src = spec.type === 'image' ? spec.value : spec.type === 'youtube' ? `https://i.ytimg.com/vi/${spec.value}/hqdefault.jpg` : spec.type === 'file' ? bgObjectUrl : '';
+  if (!src) return '';
+  return bestAccent(kmeans(await pixelsOf(src), 6)); // throws if the image won't let us read it
+}
+async function adaptAccent(spec, key) {
+  let hex = accentCache.get(key) || '';
+  if (!hex) {
+    if (spec.type === 'file') await new Promise((r) => setTimeout(r, 300)); // let the upload's object URL exist
+    hex = await accentOf(spec).catch(() => '');
+    if (hex) { accentCache.set(key, hex); try { localStorage.setItem(ACCENT_KEY, JSON.stringify(Object.fromEntries([...accentCache].slice(-40)))); } catch {} }
+  }
+  if (bgKey !== key) return;
+  if (hex) bgAccent = hex; // if it couldn't be read, keep the last one
+  applyAccent();
+  if (ui.mode === 'room') room?.update?.(roomState());
 }
 
 // ---------------------------------------------------------------- dates
@@ -763,7 +813,8 @@ function roomState() {
   const open = S.due.filter((d) => !d.done).sort((a, b) => a.date.localeCompare(b.date));
   const spec = bgFor('home');
   const grad = spec.type === 'gradient' ? GRADIENTS.find((g) => g.id === spec.value) : null;
-  const accent = S.settings.accent || '#6c47ff';
+  const accent = effectiveAccent();
+  const scene = spec.type === 'scene' ? SC.sceneById(spec.value) : null;
   return {
     accent,
     wall: mixHex('#1d1a2b', accent, 0.12),
@@ -775,7 +826,7 @@ function roomState() {
     sessions: S.sessions.length,
     musicPlaying: YT.P.playing,
     posterImage: spec.type === 'image' ? spec.value : spec.type === 'youtube' ? `https://i.ytimg.com/vi/${spec.value}/hqdefault.jpg` : '',
-    posterColors: grad ? (grad.css.match(/#[0-9a-f]{6}/gi) || []).slice(0, 4) : [mixHex('#120c26', accent, 0.2), accent, mixHex(accent, '#ffb36b', 0.5)],
+    posterColors: grad ? (grad.css.match(/#[0-9a-f]{6}/gi) || []).slice(0, 4) : scene ? scene.palette.slice(0, 4) : [mixHex('#120c26', accent, 0.2), accent, mixHex(accent, '#ffb36b', 0.5)],
     weather: S.settings.roomWeather || 'rain',
     lampOn: S.settings.roomLamp ?? true,
     custom: roomCfg(),
@@ -878,7 +929,7 @@ function catCheer() {
   if (document.hidden || S.settings.catCheer === false || !roomCfg().show.pet) return;
   const line = cheerLine();
   if (ui.mode === 'room' && room?.say(line)) SND.meow('mrrp');
-  else { toast(`🐈 ${roomCfg().petName || 'Mochi'}: ${line}`); SND.meow('small'); }
+  else { toast(`${roomCfg().petName || 'Mochi'}: “${line}”`); SND.meow('small'); }
 }
 setInterval(catCheer, 5 * 60_000);
 Object.assign(ACTS_EXTRA, {
@@ -1041,9 +1092,10 @@ function backdropHTML() {
   return `<div class="rc-sec"><b>Backdrop</b><p class="rc-note">What you see around the room.</p>
     <div class="bd-grid">
       <button class="bd ${cur ? '' : 'on'}" data-act="room-bg-clear" style="${bgThumbStyle(home)};filter:blur(2px) brightness(.7)" title="Blurred home background" aria-label="Blurred home background"><span>Home</span></button>
+      ${SC.SCENES.map((x) => tile({ type: 'scene', value: x.id }, bgThumbStyle({ type: 'scene', value: x.id }), x.name)).join('')}
       ${GRADIENTS.map((g) => tile({ type: 'gradient', value: g.id }, `background:${g.css}`, g.name)).join('')}
       ${PHOTOS.slice(0, 7).map((ph) => tile({ type: 'image', value: ph.url, label: ph.name }, `background-image:url('${ph.thumb}')`, ph.name)).join('')}
-      ${cur && !['gradient'].includes(cur.type) && !PHOTOS.some((ph) => ph.url === cur.value) ? `<button class="bd on" style="${bgThumbStyle(cur)}" aria-label="Your backdrop"><span>Yours</span></button>` : ''}
+      ${cur && !['gradient', 'scene'].includes(cur.type) && !PHOTOS.some((ph) => ph.url === cur.value) ? `<button class="bd on" style="${bgThumbStyle(cur)}" aria-label="Your backdrop"><span>Yours</span></button>` : ''}
       <label class="bd add" title="Upload an image or video" aria-label="Upload a backdrop">${ic('upload', 18)}<input type="file" accept="image/*,video/mp4,video/webm" data-change="room-bg-upload" hidden></label>
     </div>
     <form class="row-input" data-form="room-bg-url" style="padding:0"><input placeholder="…or paste an image, video or YouTube link" aria-label="Backdrop link"><button class="pill">Use</button></form>
@@ -1467,14 +1519,14 @@ Object.assign(ACTS_EXTRA, {
   'studio-usebg': async (el) => { const im = (await studioImgs())[+el.dataset.i]; applyEverywhere(im.fileId ? { type: 'file', value: im.fileId, label: im.name } : { type: 'image', value: im.src, label: im.name }); toast('Background set'); },
   'studio-accent': (el) => { studio.accent = el.dataset.h; render(); },
   'studio-mood': (el) => { studio.mood = el.dataset.m; render(); },
-  'studio-apply': () => { const th = studioTheme(); if (!th) return; S.settings.accent = th.accent; applySettings(); applyEverywhere({ type: 'css', value: th.css, ink: th.ink, label: 'Studio gradient' }); toast('Theme applied'); },
-  'studio-accent-only': () => { const th = studioTheme(); if (!th) return; S.settings.accent = th.accent; save(); applySettings(); render(); },
+  'studio-apply': () => { const th = studioTheme(); if (!th) return; S.settings.accent = th.accent; S.settings.accentMode = 'manual'; applySettings(); applyEverywhere({ type: 'css', value: th.css, ink: th.ink, label: 'Studio gradient' }); toast('Theme applied'); },
+  'studio-accent-only': () => { const th = studioTheme(); if (!th) return; S.settings.accent = th.accent; S.settings.accentMode = 'manual'; save(); applySettings(); render(); },
   'studio-save': () => openForm('Save this look', [{ k: 'name', label: 'Name', required: true, placeholder: 'e.g. Rainy library' }], (v) => {
     S.aesthetics ||= [];
-    S.aesthetics.unshift({ id: uid(), name: v.name, bg: structuredClone(bgFor(ui.mode)), accent: S.settings.accent, font: S.settings.font });
+    S.aesthetics.unshift({ id: uid(), name: v.name, bg: structuredClone(bgFor(ui.mode)), accent: S.settings.accent, accentMode: S.settings.accentMode, font: S.settings.font, style: S.settings.style });
     toast('Saved');
   }, { submit: 'Save' }),
-  'aes-apply': (el) => { const a = S.aesthetics.find((x) => x.id === el.dataset.id); S.settings.accent = a.accent; S.settings.font = a.font || 'default'; applySettings(); applyEverywhere(structuredClone(a.bg)); toast(`${a.name} applied`); },
+  'aes-apply': (el) => { const a = S.aesthetics.find((x) => x.id === el.dataset.id); S.settings.accent = a.accent; S.settings.accentMode = a.accentMode || (a.accent ? 'manual' : 'auto'); S.settings.font = a.font || 'default'; if (a.style) S.settings.style = a.style; applySettings(); applyEverywhere(structuredClone(a.bg)); toast(`${a.name} applied`); },
   'aes-del': (el) => { S.aesthetics = S.aesthetics.filter((x) => x.id !== el.dataset.id); save(); render(); },
   'gh-example': (el) => ghLoad(...el.dataset.repo.split('/'), el.dataset.path),
   'gh-open': (el) => ghLoad(studio.gh.owner, studio.gh.repo, el.dataset.path, studio.gh.ref),
@@ -1500,7 +1552,7 @@ Object.assign(FORMS_EXTRA, {
 });
 
 // ---------------------------------------------------------------- settings
-const ACCENTS = ['#6c47ff', '#3b82f6', '#06b6d4', '#10b981', '#84cc16', '#f59e0b', '#f97316', '#ef4444', '#ec4899', '#a855f7'];
+const ACCENTS = ['#c2593b', '#d98e2b', '#5f8a4f', '#2f7f86', '#3b5bb5', '#7b4fb0', '#c43f6e', '#2b2a33'];
 function inkFor(hex) { const n = parseInt(hex.slice(1), 16); return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 > 0.62 ? '#111111' : '#ffffff'; }
 function settingsView() {
   const st = S.settings;
@@ -1508,11 +1560,11 @@ function settingsView() {
   const cur = st.bgSame ? st.bg.home : st.bg[tab];
   const isOn = (spec) => cur && cur.type === spec.type && String(cur.value) === String(spec.value);
   const card = (spec, name, thumbStyle, sub = '', badge = '') => `<button class="lib-card ${isOn(spec) ? 'on' : ''}" data-act="bg-pick" data-spec="${esc(JSON.stringify(spec))}"><span class="im" style="${thumbStyle}">${badge ? `<span class="badge">${badge}</span>` : ''}</span>${esc(name)}${sub ? `<small>${esc(sub)}</small>` : ''}</button>`;
-  const curName = cur.type === 'css' ? (cur.label || 'Studio gradient') : cur.type === 'gradient' ? (GRADIENTS.find((g) => g.id === cur.value)?.name || 'Gradient') : cur.label || ({ image: 'Image link', youtube: 'YouTube video', video: 'Video link', file: 'Your upload' }[cur.type]);
+  const curName = cur.type === 'scene' ? SC.sceneById(cur.value).name : cur.type === 'css' ? (cur.label || 'Studio gradient') : cur.type === 'gradient' ? (GRADIENTS.find((g) => g.id === cur.value)?.name || 'Gradient') : cur.label || ({ image: 'Image link', youtube: 'YouTube video', video: 'Video link', file: 'Your upload' }[cur.type]);
   return `<div class="page wide">
     <div class="ph"><h1>Settings</h1><p>Make it yours. Everything saves as you change it.</p></div>
 
-    <div class="sec"><div class="sec-head"><h2>Background</h2><span class="spacer"></span><a class="btn" href="#/studio">${ic('sparkle')} Build one in the Aesthetic studio</a></div>
+    <div class="sec"><div class="sec-head"><h2>Background</h2><span class="spacer"></span><a class="btn" href="#/studio">${ic('brush')} Build one in the Aesthetic studio</a></div>
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
         ${st.bgSame ? '' : `<div class="seg-tabs" role="tablist">${['home', 'focus', 'ambient', 'room'].map((m) => `<button class="${tab === m ? 'on' : ''}" data-act="bg-tab" data-tab="${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}</div>`}
         <label class="switch"><input type="checkbox" data-change="set" data-k="bgSame" ${st.bgSame ? 'checked' : ''}> Same background for every mode</label>
@@ -1523,6 +1575,7 @@ function settingsView() {
         <form class="row-input" data-form="bg-url" style="padding:0"><input placeholder="…or paste an image, video or YouTube link" aria-label="Background link"><button class="pill accent">Use</button></form>
         <label class="field">Darken photos and videos <input type="range" min="0" max="70" value="${st.dim}" data-input="dim" style="padding:0"></label>
       </div></details>
+      <div class="sec"><h2 style="font-size:15px">Painted</h2><div class="lib-row">${SC.SCENES.map((x) => card({ type: 'scene', value: x.id }, x.name, bgThumbStyle({ type: 'scene', value: x.id }))).join('')}</div></div>
       <div class="sec"><h2 style="font-size:15px">Gradients</h2><div class="lib-row">${GRADIENTS.map((g) => card({ type: 'gradient', value: g.id }, g.name, `background:${g.css}`)).join('')}</div></div>
       <div class="sec"><h2 style="font-size:15px">Photos</h2><div class="lib-row">${PHOTOS.map((p) => card({ type: 'image', value: p.url, label: p.name, credit: p.by }, p.name, `background-image:url('${p.thumb}')`, `by ${p.by} · Unsplash`)).join('')}</div></div>
       <div class="sec"><h2 style="font-size:15px">Animated</h2><div class="lib-row">${ANIMATED.map((a) => card({ type: 'youtube', value: a.id, label: a.name }, a.name, `background-image:url('${a.thumb}')`, 'YouTube, muted', 'LIVE')).join('')}</div></div>
@@ -1536,9 +1589,13 @@ function settingsView() {
       <div style="display:flex;gap:18px;flex-wrap:wrap"><label class="switch"><input type="checkbox" data-change="set" data-k="quotes" ${st.quotes ? 'checked' : ''}> Show a quote</label><label class="switch"><input type="checkbox" data-change="set" data-k="clock24" ${st.clock24 ? 'checked' : ''}> 24-hour clock</label></div></div>
 
     <div class="sec"><h2>Look</h2>
-      <div class="field">Accent colour<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${ACCENTS.map((c) => `<button class="swatch ${(st.accent || '#6c47ff') === c ? 'on' : ''}" style="background:${c}" data-act="accent" data-c="${c}" aria-label="Accent ${c}"></button>`).join('')}<input type="color" value="${esc(st.accent || '#6c47ff')}" data-change="set" data-k="accent" aria-label="Any accent colour" style="width:40px;height:30px;padding:0;border:0;background:none;cursor:pointer"></div></div>
+      <div class="field">Style${styleCardsHTML()}</div>
+      <div class="field">Accent colour
+        <div class="chips"><button class="chip ${manualAccent() ? '' : 'on'}" data-act="accent-auto" aria-pressed="${!manualAccent()}">From my background</button><button class="chip ${manualAccent() ? 'on' : ''}" data-act="accent-manual" aria-pressed="${manualAccent()}">My own colour</button></div>
+        ${manualAccent() ? `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${ACCENTS.map((c) => `<button class="swatch ${st.accent === c ? 'on' : ''}" style="background:${c}" data-act="accent" data-c="${c}" aria-label="Accent ${c}"></button>`).join('')}<input type="color" value="${esc(st.accent)}" data-change="set" data-k="accent" aria-label="Any accent colour" style="width:40px;height:30px;padding:0;border:0;background:none;cursor:pointer"></div>`
+          : `<p class="setup-hint" style="margin:0;display:flex;gap:8px;align-items:center"><span class="swatch" style="background:var(--accent);cursor:default"></span>Picked from your background. It changes when the background does.</p>`}</div>
       <div class="set-grid">
-        <label class="field">Font<select data-change="set" data-k="font">${[['default', 'Plus Jakarta Sans'], ['classic', 'Newsreader (serif)'], ['mono', 'JetBrains Mono']].map(([v, l]) => `<option value="${v}" ${st.font === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="field">Font<select data-change="set" data-k="font">${[['default', 'The style’s own'], ['classic', 'Newsreader (serif)'], ['mono', 'JetBrains Mono']].map(([v, l]) => `<option value="${v}" ${st.font === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <label class="field">Default note paper<select data-change="set" data-k="noteStyle">${[['ruled', 'Ruled notebook'], ['clean', 'Clean'], ['grid', 'Graph paper'], ['cornell', 'Cornell']].map(([v, l]) => `<option value="${v}" ${st.noteStyle === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><label class="switch"><input type="checkbox" data-change="set" data-k="stickers" ${st.stickers ? 'checked' : ''}> Show stickers</label><button class="btn" data-act="tray">${ic('sparkle')} Sticker tray</button></div></div>
@@ -1558,11 +1615,39 @@ function settingsView() {
         ${hasExamples() ? '<button class="btn" data-act="clear-examples">Clear example data</button>' : ''}${(() => { try { return localStorage.getItem(BACKUP_KEY) ? '<button class="btn" data-act="restore-cleanup">Undo example cleanup</button>' : ''; } catch { return ''; } })()}<button class="btn danger" data-act="reset-all">Start over</button></div></div>
   </div>`;
 }
+// ---------------------------------------------------------------- styles: whole looks to choose from
+const STYLES = [
+  { id: 'paper', name: 'Stationery', note: 'Cream card, a fountain-pen serif, ink-stamp shadows.', fonts: 'family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..700&family=Instrument+Sans:wght@400..700' },
+  { id: 'radio', name: 'Night radio', note: 'Black hardware, dot-matrix numbers that glow, scanlines.', fonts: 'family=DotGothic16&family=JetBrains+Mono:wght@400;500;700' },
+  { id: 'zine', name: 'Risograph zine', note: 'Newsprint and two inks printed a little out of line.', fonts: 'family=Bricolage+Grotesque:opsz,wght@12..96,400..800' },
+  { id: 'quiet', name: 'Quiet', note: 'Only type on your background. Buttons stay out of the way.', fonts: 'family=Instrument+Serif:ital@0;1&family=Instrument+Sans:wght@400..700' },
+  { id: 'glass', name: 'Soft glass', note: 'Frosted panels and a bold sans: the original look.', fonts: '' },
+];
+const styleOf = () => STYLES.find((x) => x.id === S.settings.style) || STYLES[0];
+const fontsLoaded = new Set();
+// each style's fonts load only when it's used (or when the picker needs to show them all)
+function loadStyleFonts(id) {
+  for (const x of id === 'all' ? STYLES : STYLES.filter((y) => y.id === id)) {
+    if (!x.fonts || fontsLoaded.has(x.id)) continue;
+    fontsLoaded.add(x.id);
+    const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = `https://fonts.googleapis.com/css2?${x.fonts}&display=swap`;
+    document.head.append(l);
+  }
+}
+function styleCardsHTML() {
+  loadStyleFonts('all');
+  const spec = bgFor('home');
+  const ink = spec.type === 'scene' ? SC.sceneById(spec.value).ink : spec.type === 'gradient' ? (GRADIENTS.find((g) => g.id === spec.value) || GRADIENTS[0]).ink : spec.type === 'css' ? spec.ink || 'light' : 'light';
+  return `<div class="style-grid">${STYLES.map((x) => `<button class="style-card ${styleOf().id === x.id ? 'on' : ''}" data-act="style" data-v="${x.id}" aria-pressed="${styleOf().id === x.id}">
+    <span class="sd" data-style="${x.id}" data-ink="${ink}" style="${bgThumbStyle(spec)}"><span class="w">${esc((S.settings.appName || 'fokus').toLowerCase())}</span><span class="c num">${clockStr()}</span><span class="b"><i></i><i></i><i></i></span></span>
+    <b>${x.name}</b><small>${x.note}</small></button>`).join('')}</div>`;
+}
 function applySettings() {
-  const st = S.settings, root = document.documentElement, rs = root.style;
+  const st = S.settings, root = document.documentElement;
   root.dataset.font = st.font;
-  if (/^#[0-9a-f]{6}$/i.test(st.accent || '')) { rs.setProperty('--accent', st.accent); rs.setProperty('--accent-ink', inkFor(st.accent)); }
-  else { rs.removeProperty('--accent'); rs.removeProperty('--accent-ink'); }
+  root.dataset.style = styleOf().id;
+  loadStyleFonts(styleOf().id);
+  applyAccent();
 }
 function setBg(spec) {
   const st = S.settings;
@@ -1585,6 +1670,7 @@ function setupView() {
       <p class="setup-hint">Type a name and press Enter. Add a course code after a comma if you like.</p>` },
     { done: S.lectures.length > 0, title: 'Lecture times', body: subjects.length ? `<div class="setup-list">${subjects.map((x) => `<div class="setup-row"><i style="background:${esc(x.color)}"></i><b>${esc(x.name)}</b><small>${lecOf(x.id).map((l) => `${l.days.map((d) => DOW[d]).join(' ')} ${fmtTime(l.start)}`).join(' · ') || 'No times yet'}</small><button class="btn sm" data-act="lecture-new" data-subject="${x.id}">${ic('plus')} Time</button></div>`).join('')}</div>` : '<p class="setup-hint">Add a subject first.</p>' },
     { done: S.due.length > 0, title: 'What’s due', body: `${S.due.filter((d) => !d.done).slice(0, 4).map((d) => `<div class="setup-row"><b>${esc(d.title)}</b><small>${relDate(d.date)}</small></div>`).join('')}<button class="btn" data-act="due-new">${ic('plus')} Add a deadline</button>` },
+    { done: !!st.styleChosen, title: 'Pick a look', body: `${styleCardsHTML()}<p class="setup-hint">Backgrounds are in Settings. The accent colour follows whichever you choose.</p>` },
     { done: S.resources.length > 0, title: 'Notes, textbooks and slides', body: `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="res-new" data-type="note">${ic('note')} Write a note</button><button class="btn" data-act="res-new" data-type="textbook">${ic('book')} Add a textbook</button><button class="btn" data-act="res-new" data-type="slides">${ic('slides')} Add slides</button></div>
       <p class="setup-hint">Textbooks and slides can be a PDF from your computer or a link. ${S.resources.length ? `You have ${S.resources.length} so far.` : ''}</p>` },
   ];
@@ -1922,7 +2008,10 @@ const ACTS = {
 
   'bg-tab': (el) => { ui.bgTab = el.dataset.tab; ui.mode = el.dataset.tab; saveUI(); render(); },
   'bg-pick': (el) => setBg(JSON.parse(el.dataset.spec)),
-  accent: (el) => { S.settings.accent = el.dataset.c; save(); applySettings(); render(); },
+  accent: (el) => { S.settings.accent = el.dataset.c; S.settings.accentMode = 'manual'; save(); applySettings(); render(); },
+  'accent-auto': () => { S.settings.accentMode = 'auto'; save(); applySettings(); render(); },
+  'accent-manual': () => { S.settings.accentMode = 'manual'; if (!isHex(S.settings.accent)) S.settings.accent = effectiveAccent(); save(); applySettings(); render(); },
+  style: (el) => { S.settings.style = el.dataset.v; S.settings.styleChosen = true; save(); applySettings(); render(); },
   'chime-test': () => { const c = S.settings.chime; S.settings.chime = true; chime(); S.settings.chime = c; },
   'notify-perm': async () => { try { const p = await Notification.requestPermission(); toast(p === 'granted' ? 'Notifications on' : 'Notifications are blocked in this browser'); } catch { toast('This browser doesn’t support notifications'); } },
   export: () => {
@@ -2089,7 +2178,7 @@ const VIEWS = { setup: setupView, studio: studioView, today: todayView, subjects
 // GitHub Pages lets browsers keep files for 10 minutes, so friends could end up on different
 // versions. When version.json online is newer than this copy, re-download every file into the
 // browser cache and reload, so everyone runs the same thing.
-const APP_FILES = ['./', 'index.html', 'styles.css', 'version.json', 'sw.js', ...['app', 'store', 'md', 'player', 'sounds', 'together', 'room', 'visualiser', 'version', 'avatar'].map((f) => `js/${f}.js`)];
+const APP_FILES = ['./', 'index.html', 'styles.css', 'version.json', 'sw.js', ...['app', 'store', 'md', 'player', 'sounds', 'together', 'room', 'visualiser', 'version', 'avatar', 'scenes'].map((f) => `js/${f}.js`)];
 let updating = false;
 async function checkForUpdate() {
   if (updating || location.hostname === 'localhost') return;
@@ -2113,9 +2202,14 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) chec
 { const n = removePlaceholders(); if (n) setTimeout(() => toast(`Removed ${n} example items. Settings → Your data can undo this.`), 1200); }
 // first visit (or nothing added yet): start with setup
 if (!S.settings.setupDone && !S.subjects.length && !location.hash.replace(/^#\/?/, '')) location.hash = '#/setup';
+// one time: people still on the old default gradient move to the new painted default
+if (!S.settings.lookV2) {
+  for (const m of ['home', 'focus']) { const b = S.settings.bg[m]; if (b?.type === 'gradient' && b.value === 'twilight') S.settings.bg[m] = { type: 'scene', value: 'ridges' }; }
+  S.settings.lookV2 = true; save();
+}
 applySettings();
 SND.setMuted(S.settings.catSounds === false);
-VIZ.mountStage($('#viz'), () => ({ style: S.settings.visualiser || 'bars', hidden: ui.mode === 'room', musicPlaying: YT.P.playing, accent: S.settings.accent || '#6c47ff' }));
+VIZ.mountStage($('#viz'), () => ({ style: S.settings.visualiser || 'bars', hidden: ui.mode === 'room', musicPlaying: YT.P.playing, accent: effectiveAccent() }));
 render();
 {
   // an invite link: join straight away if we know your name, otherwise ask for it first

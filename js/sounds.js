@@ -141,42 +141,119 @@ function env(g, t, peak, a, d) { g.gain.setValueAtTime(0.0001, t); g.gain.expone
 let white = null;
 const noise = () => (white ||= noiseBuffer('white'));
 
-// a meow is a glottal buzz (sawtooth) gliding up then down, shaped by two vowel formants: "mi-aow"
-export function meow(kind = 'meow') {
-  if (muted || !ensure()) return;
-  const t = now() + 0.01, len = kind === 'mrrp' ? 0.32 : kind === 'small' ? 0.38 : 0.7;
-  const base = (kind === 'small' ? 620 : 470) * (0.92 + Math.random() * 0.16);
-  const o = ac.createOscillator(); o.type = 'sawtooth';
-  o.frequency.setValueAtTime(base * 0.8, t);
-  o.frequency.linearRampToValueAtTime(base * 1.35, t + len * 0.35);
-  o.frequency.linearRampToValueAtTime(base * 0.75, t + len);
-  if (kind === 'mrrp') { const trill = ac.createOscillator(); trill.frequency.value = 28; const tg = ac.createGain(); tg.gain.value = base * 0.12; trill.connect(tg).connect(o.frequency); trill.start(t); trill.stop(t + len); }
-  const f1 = ac.createBiquadFilter(); f1.type = 'bandpass'; f1.Q.value = 5;
-  f1.frequency.setValueAtTime(500, t); f1.frequency.linearRampToValueAtTime(1100, t + len * 0.4); f1.frequency.linearRampToValueAtTime(700, t + len);
-  const f2 = ac.createBiquadFilter(); f2.type = 'bandpass'; f2.Q.value = 7;
-  f2.frequency.setValueAtTime(1600, t); f2.frequency.linearRampToValueAtTime(2300, t + len * 0.4); f2.frequency.linearRampToValueAtTime(1300, t + len);
-  const g = ac.createGain(); env(g, t, 0.55, 0.06, len);
-  const g2 = ac.createGain(); g2.gain.value = 0.5;
-  o.connect(f1).connect(g); o.connect(f2).connect(g2).connect(g); g.connect(fx);
-  o.start(t); o.stop(t + len + 0.1);
+// A meow is a voice, not a buzzer: a soft harmonic source (falling off like a real throat) with a
+// little vibrato and wobble, sent through three vowel formants that slide "m-i-a-o-w". The "m" is the
+// mouth opening: a low-pass that starts nearly closed and opens in the first tenth of a second.
+const VOICES = new WeakMap();
+function voiceWave(ctx) {
+  if (!VOICES.has(ctx)) {
+    const n = 32, re = new Float32Array(n), im = new Float32Array(n);
+    for (let k = 1; k < n; k++) im[k] = 1 / k ** 1.5;
+    VOICES.set(ctx, ctx.createPeriodicWave(re, im));
+  }
+  return VOICES.get(ctx);
+}
+// [time 0..1, value] points for pitch (× base), formants (Hz) and how open the mouth is (Hz)
+const CALLS = {
+  meow: { len: 0.7, f0: 560, pitch: [[0, 0.8], [0.3, 1.2], [0.62, 1.1], [1, 0.72]], f1: [[0, 380], [0.28, 760], [0.6, 920], [1, 520]], f2: [[0, 2300], [0.28, 2000], [0.6, 1450], [1, 900]], mouth: [[0, 650], [0.14, 6000], [0.8, 4000], [1, 1400]] },
+  small: { len: 0.4, f0: 820, pitch: [[0, 0.85], [0.35, 1.18], [1, 0.9]], f1: [[0, 480], [0.35, 980], [1, 700]], f2: [[0, 2700], [0.35, 2200], [1, 1500]], mouth: [[0, 900], [0.15, 7000], [1, 2500]] },
+  // the little rolling "mrrp?" cats make when they greet you: closed mouth, trilled, rising at the end
+  mrrp: { len: 0.38, f0: 500, pitch: [[0, 0.92], [0.55, 1.02], [1, 1.32]], f1: [[0, 320], [0.55, 420], [1, 720]], f2: [[0, 1600], [0.55, 1750], [1, 2000]], mouth: [[0, 700], [0.5, 1300], [1, 4500]], trill: 0.6 },
+};
+const curve = (param, pts, t, len, k = 1) => pts.forEach(([at, v], i) => (i ? param.linearRampToValueAtTime(v * k, t + at * len) : param.setValueAtTime(v * k, t)));
+
+export function meowInto(ctx, dest, t, kind = 'meow', noiseBuf) {
+  const c = CALLS[kind] || CALLS.meow;
+  const len = c.len * (0.9 + Math.random() * 0.2), f0 = c.f0 * (0.9 + Math.random() * 0.2);
+  const end = t + len + 0.05;
+  const src = ctx.createOscillator(); src.setPeriodicWave(voiceWave(ctx));
+  curve(src.frequency, c.pitch, t, len, f0);
+  // vibrato and a faster irregular wobble so it doesn't sound like a synth note
+  [[5.5, 0.022], [13.7, 0.009]].forEach(([hz, depth]) => {
+    const l = ctx.createOscillator(); l.frequency.value = hz * (0.9 + Math.random() * 0.2);
+    const g = ctx.createGain(); g.gain.value = f0 * depth; l.connect(g).connect(src.frequency); l.start(t); l.stop(end);
+  });
+  const amp = ctx.createGain(); amp.gain.value = 1;
+  src.connect(amp);
+  // breath: a little air in the voice
+  const air = ctx.createBufferSource(); air.buffer = noiseBuf; air.loop = true;
+  const airF = ctx.createBiquadFilter(); airF.type = 'bandpass'; airF.frequency.value = 2800; airF.Q.value = 0.8;
+  const airG = ctx.createGain(); airG.gain.value = 0.12; air.connect(airF).connect(airG).connect(amp); air.start(t, Math.random() * 2); air.stop(end);
+  if (c.trill) {
+    const l = ctx.createOscillator(); l.frequency.value = 24 + Math.random() * 4;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.45, t); g.gain.linearRampToValueAtTime(0.45, t + len * c.trill * 0.8); g.gain.linearRampToValueAtTime(0, t + len * c.trill);
+    amp.gain.setValueAtTime(0.55, t); amp.gain.linearRampToValueAtTime(0.55, t + len * c.trill * 0.8); amp.gain.linearRampToValueAtTime(1, t + len * c.trill);
+    l.connect(g).connect(amp.gain); l.start(t); l.stop(end);
+  }
+  const mix = ctx.createGain();
+  [['f1', 3.5, 1], ['f2', 6, 0.55], [null, 9, 0.22]].forEach(([key, q, level]) => {
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = q;
+    if (key) curve(f.frequency, c[key], t, len); else f.frequency.value = 3300;
+    const g = ctx.createGain(); g.gain.value = level; amp.connect(f).connect(g).connect(mix);
+  });
+  const body = ctx.createBiquadFilter(); body.type = 'lowpass'; body.frequency.value = 1100;
+  const bodyG = ctx.createGain(); bodyG.gain.value = 0.18; amp.connect(body).connect(bodyG).connect(mix);
+  const mouth = ctx.createBiquadFilter(); mouth.type = 'lowpass'; mouth.Q.value = 0.7; curve(mouth.frequency, c.mouth, t, len);
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(0.0001, t); env.gain.exponentialRampToValueAtTime(1, t + 0.035);
+  env.gain.setValueAtTime(1, t + len * 0.7); env.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  const out = ctx.createGain(); out.gain.value = 0.42; // peaks around 0.5, level with the toys
+  mix.connect(mouth).connect(env).connect(out).connect(dest);
+  src.start(t); src.stop(end);
 }
 
-// purring: low rumble pulsed ~25 times a second, swelling with each breath
+// A purr is a stream of tiny flutters ~25 a second, louder breathing out than in. Built as a few
+// seconds of individual pulses (each a short thump plus a burst of air) so it has the texture of a
+// real purr and enough mid frequencies to come through laptop and phone speakers, which can't play
+// the deep rumble alone.
+export function purrBuffer(ctx) {
+  const sr = ctx.sampleRate, breaths = [];
+  let at = 0;
+  for (let i = 0; i < 2; i++) {
+    const out = 1.1 + Math.random() * 0.3, gap = 0.12, inn = 0.85 + Math.random() * 0.25;
+    breaths.push([at, out, 1], [at + out + gap, inn, 0.55]); at += out + gap + inn + gap;
+  }
+  const len = Math.ceil(at * sr), d = new Float32Array(len), buf = ctx.createBuffer(1, len, sr);
+  for (const [start, dur, level] of breaths) {
+    const rate = 24 + Math.random() * 3;
+    for (let p = start; p < start + dur; p += (1 + (Math.random() - 0.5) * 0.12) / rate) {
+      const shape = Math.sin(Math.PI * (p - start) / dur) ** 0.6; // swell and fade within the breath
+      const a = level * shape * (0.75 + Math.random() * 0.5), i0 = Math.floor(p * sr);
+      const ring = 110 + Math.random() * 40, n = Math.floor(0.03 * sr);
+      for (let j = 0; j < n && i0 + j < len; j++) {
+        const s = j / sr;
+        d[i0 + j] += a * (0.4 * Math.sin(2 * Math.PI * ring * s) * Math.exp(-s * 90) + 0.8 * (Math.random() * 2 - 1) * Math.exp(-s * 140));
+      }
+    }
+  }
+  buf.copyToChannel(d, 0);
+  return buf;
+}
+const PURRS = new WeakMap();
+export function purrInto(ctx, dest) {
+  if (!PURRS.has(ctx)) PURRS.set(ctx, purrBuffer(ctx));
+  const src = ctx.createBufferSource(); src.buffer = PURRS.get(ctx); src.loop = true;
+  const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 90;
+  const warm = ctx.createBiquadFilter(); warm.type = 'peaking'; warm.frequency.value = 420; warm.Q.value = 0.8; warm.gain.value = 9;
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1600;
+  const out = ctx.createGain(); out.gain.value = 0;
+  src.connect(hp).connect(warm).connect(lp).connect(out).connect(dest);
+  src.start();
+  return { src, out };
+}
+
+export function meow(kind = 'meow') {
+  if (muted || !ensure()) return;
+  meowInto(ac, fx, now() + 0.01, kind, noise());
+}
 let purrNode = null;
+const PURR_LEVEL = 0.55;
 export function purr(on) {
   if (on && (muted || purrNode)) return;
-  if (!on) { if (purrNode && ac) { const p = purrNode; purrNode = null; p.out.gain.setTargetAtTime(0, now(), 0.15); setTimeout(() => { try { p.src.stop(); p.lfo.stop(); p.breath.stop(); } catch {} }, 600); } return; }
+  if (!on) { if (purrNode && ac) { const p = purrNode; purrNode = null; p.out.gain.setTargetAtTime(0, now(), 0.15); setTimeout(() => { try { p.src.stop(); } catch {} }, 700); } return; }
   ensure();
-  const src = ac.createBufferSource(); src.buffer = noiseBuffer('brown'); src.loop = true;
-  const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 260;
-  const am = ac.createGain(); am.gain.value = 0.5;
-  const lfo = ac.createOscillator(); lfo.frequency.value = 24; const depth = ac.createGain(); depth.gain.value = 0.5; lfo.connect(depth).connect(am.gain);
-  const breathG = ac.createGain(); breathG.gain.value = 0.6;
-  const breath = ac.createOscillator(); breath.frequency.value = 0.45; const bd = ac.createGain(); bd.gain.value = 0.4; breath.connect(bd).connect(breathG.gain);
-  const out = ac.createGain(); out.gain.value = 0; out.gain.setTargetAtTime(1.6, now(), 0.2);
-  src.connect(lp).connect(am).connect(breathG).connect(out).connect(fx);
-  src.start(); lfo.start(); breath.start();
-  purrNode = { src, lfo, breath, out };
+  purrNode = purrInto(ac, fx);
+  purrNode.out.gain.setTargetAtTime(PURR_LEVEL, now(), 0.2);
 }
 
 // a struck tube: a few inharmonic partials with long exponential decays

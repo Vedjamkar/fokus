@@ -917,7 +917,9 @@ export async function mountRoom(host, opts) {
     const a = accent();
     if (C.curtains && C.curtains !== 'accent') curtainM.color.set(C.curtains); else curtainM.color.copy(a).multiplyScalar(0.75);
     seatM.color.copy(a);
-    if (C.rug && C.rug !== 'accent') rug.material.color.set(C.rug); else rug.material.color.copy(a).multiplyScalar(0.55);
+    // the rug is clickable, so it wears its own copy of the material: colour the original, then copy it over (syncOwn)
+    const rugM = rug.material.userData.src || rug.material;
+    if (C.rug && C.rug !== 'accent') rugM.color.set(C.rug); else rugM.color.copy(a).multiplyScalar(0.55);
     const wall = new THREE.Color(C.wall && C.wall !== 'auto' ? C.wall : S.wall || '#2c2540');
     wallMat.color.copy(wall);
     trim.color.copy(wall).multiplyScalar(1.25);

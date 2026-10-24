@@ -20,12 +20,13 @@ export const DEFAULT_SETTINGS = {
   termStart: addDays(-45), termEnd: addDays(67),
   focus: { work: 25, short: 5, long: 15, every: 4, autoBreak: true, autoFocus: false },
   chime: true,
+  style: 'paper', accentMode: 'auto', // the look: see STYLES in app.js; the accent follows the background unless you pick one
   accent: '', stickers: true, userName: '', clock24: false, dim: 25,
-  // background per mode; each is { type: gradient | image | youtube | video | file, value, label?, credit? }
+  // background per mode; each is { type: scene | gradient | image | youtube | video | file, value, label?, credit? }
   bgSame: false,
   bg: {
-    home: { type: 'gradient', value: 'twilight' },
-    focus: { type: 'gradient', value: 'twilight' },
+    home: { type: 'scene', value: 'ridges' },
+    focus: { type: 'scene', value: 'ridges' },
     ambient: { type: 'youtube', value: 'rFZHOHl-L8A', label: 'Lofi Girl study room' },
   },
 };
