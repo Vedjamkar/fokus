@@ -51,6 +51,13 @@ A 3D isometric study room you can orbit around. Every object is part of the app:
 
 **Arrange** (move button): drag furniture across the floor, and the clock, poster, calendar and corkboard along their walls. Press **R** to rotate. Everything on the desk moves with the desk, labels follow what you move, and friends' cushions stay around the rug. The layout saves automatically, and the customise panel can reset it.
 
+**Music without ads** (Music panel):
+- YouTube links (songs and playlists) play with no ads, video included, through Invidious servers, open-source YouTube front ends that fetch the streams for you. FOKUS reads the live list at api.invidious.io once a day and uses the healthiest public servers that allow other websites, remembering the last one that worked.
+- Public servers come and go. For the steadiest setup, run your own Invidious server and add it under *Use your own server*; it's always tried first.
+- If no server answers (or for live streams outside Safari), YouTube's own player takes over and a note says ads are possible.
+- Radio: ten ad-free live stations (lofi, chillhop, jazz, ambient…). Their sound drives the visualiser directly.
+- Music plays through the page itself, so it keeps going with a phone's screen locked and shows lock-screen controls.
+
 **Ambient sounds** (in the Music panel): rain, fireplace, wind, brown noise and typing. They're generated live in the browser, so there are no audio files. So are the cat's meows and purr and the toys' sounds.
 
 **Visualiser** (Music panel): bars or a wave along the bottom of the screen, plus the room's speaker and fairy lights. Ambient sounds drive it directly. YouTube plays in a sealed frame the page can't listen to, so while it plays the bars keep a gentle made-up groove. Click **React to YouTube** and share this tab with its audio to make them follow the real music.

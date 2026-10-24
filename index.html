@@ -49,8 +49,9 @@
       <button class="sq" data-act="yt-next" aria-label="Next" id="np-next"></button>
       <input type="range" id="np-vol" min="0" max="100" value="60" data-input="yt-vol" aria-label="Volume">
     </div>
-    <div class="yt-frame"><div id="yt-host"></div></div>
+    <div class="yt-frame"><div id="yt-host"></div><video id="np-video" playsinline muted preload="auto" hidden></video><div class="yt-badge" id="np-badge" hidden>Ad-free</div></div>
     <div class="err" id="np-err" hidden></div>
+    <div class="np-note" id="np-note" hidden></div>
     <form class="row-input" data-form="yt-paste"><input placeholder="Paste a YouTube or YT Music link" aria-label="YouTube link"><button class="pill accent">Play</button></form>
     <div class="tracks" id="tracks"></div>
     <div class="mixer" id="mixer"></div>

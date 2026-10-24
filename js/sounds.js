@@ -214,3 +214,13 @@ export function whoosh(vol = 0.3, len = 0.6) {
   bp.frequency.setValueAtTime(400, t); bp.frequency.exponentialRampToValueAtTime(1800, t + len * 0.4); bp.frequency.exponentialRampToValueAtTime(500, t + len);
   const g = ac.createGain(); env(g, t, vol, len * 0.3, len * 0.7); s.connect(bp).connect(g).connect(fx); s.start(t, Math.random(), len + 0.1);
 }
+
+// ---------------------------------------------------------------- radio into the visualiser
+// Once a media element is routed into Web Audio it only plays through here, so this is only used
+// for sources that allow reading (radio). Must run inside a tap so the audio context can start.
+export function attachMedia(el) {
+  ensure();
+  if (el._fokusSource) return;
+  el._fokusSource = ac.createMediaElementSource(el);
+  el._fokusSource.connect(master);
+}

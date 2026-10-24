@@ -436,9 +436,15 @@ function renderTracks() {
 function syncPlayer() {
   const P = YT.P;
   const has = P.id || P.list;
-  $('#np-title').textContent = has ? P.title : 'Nothing playing';
-  $('#np-sub').textContent = P.error ? '' : has ? P.author || 'YouTube' : 'Pick a track or paste a YouTube link';
-  $('#np-art').style.backgroundImage = P.id ? `url('${YT.thumb(P.id)}')` : '';
+  const st = P.mode === 'radio' ? STATIONS.find((x) => x.id === P.station) : null;
+  const live = has || st;
+  $('#np-title').textContent = live ? P.title : 'Nothing playing';
+  $('#np-sub').textContent = P.error ? '' : live ? `${P.author || 'YouTube'}${P.mode === 'adfree' ? ' · ad-free' : ''}` : 'Pick a station, a track, or paste a YouTube link';
+  const art = $('#np-art');
+  art.style.backgroundImage = P.id ? `url('${YT.thumb(P.id)}')` : st ? `linear-gradient(135deg, ${st.c[0]}, ${st.c[1]})` : '';
+  art.textContent = st && !P.id ? st.e : '';
+  const note = $('#np-note'); note.hidden = !P.note; note.textContent = P.note;
+  $$('#radio .station').forEach((e) => e.classList.toggle('on', P.mode === 'radio' && e.dataset.id === P.station));
   $('#np-play').innerHTML = ic(P.playing ? 'pause' : 'play');
   const err = $('#np-err'); err.hidden = !P.error; err.textContent = P.error;
   $$('#tracks .track').forEach((e) => {
@@ -453,6 +459,8 @@ function syncPlayer() {
 }
 YT.onChange(syncPlayer);
 YT.P.volume = S.music.volume ?? 60;
+YT.P.adFree = S.settings.adFree !== false;
+YT.P.ownServer = S.settings.invidious || '';
 $('#np-vol').value = YT.P.volume;
 $('#np-prev').innerHTML = ic('prev'); $('#np-next').innerHTML = ic('next'); $('#music-ic').innerHTML = ic('music'); $('#music-x').innerHTML = ic('x');
 async function playLink(url) {
@@ -1039,6 +1047,16 @@ Object.assign(CHANGES_EXTRA, {
   },
 });
 Object.assign(FORMS_EXTRA, {
+  'inv-server': async (v) => {
+    let url; try { url = new URL(/^https?:\/\//.test(v) ? v : `https://${v}`); } catch { return toast('That doesn’t look like a web address'); }
+    const base = url.origin;
+    toast('Checking that server…');
+    try {
+      const r = await fetch(`${base}/api/v1/stats`, { signal: AbortSignal.timeout(7000) });
+      if (!r.ok) throw new Error();
+      S.settings.invidious = base; YT.P.ownServer = base; save(); renderMixer(); toast(`Using ${url.hostname} first`);
+    } catch { toast('Couldn’t reach that server’s API from here. It needs its API on and to allow other websites (CORS).'); }
+  },
   'room-bg-url': (v) => {
     const yt = YT.parseYT(v);
     if (yt?.v) setRoomBg({ type: 'youtube', value: yt.v, label: 'YouTube video' });
@@ -1226,15 +1244,50 @@ function togetherHTML() {
   </div>`;
 }
 
+// ---------------------------------------------------------------- radio: ad-free live stations
+// Picked because they stream over https and let the page read their sound, so the visualiser
+// follows the real music. Tested October 2026; any that stop working just show a message.
+const STATIONS = [
+  { id: 'reyfm-lofi', name: 'REYFM #lofi', genre: 'Lofi beats', e: '🎧', c: ['#3b2a7a', '#e0725f'], url: 'https://listen.reyfm.de/lofi_320kbps.mp3' },
+  { id: '0r-lofi', name: '0R Lo-Fi', genre: 'Lofi study', e: '📚', c: ['#1c1240', '#6c47ff'], url: 'https://0nlineradio.radioho.st/0r-lo-fi' },
+  { id: 'chillhop', name: 'I Love Chillhop', genre: 'Chillhop', e: '🌿', c: ['#1f3d34', '#4fb3a9'], url: 'https://ilm.stream27.radiohost.de/ilm_ilovechillhop_mp3-192' },
+  { id: 'isekoi', name: 'ISEKOI Chill Zone', genre: 'Chill electronic', e: '🌙', c: ['#16213e', '#7ad7ff'], url: 'https://public.isekoi-radio.com/listen/chill/radio.mp3' },
+  { id: 'plaza', name: 'Nightwave Plaza', genre: 'Vaporwave · city pop', e: '🌆', c: ['#3a1450', '#ff7ab0'], url: 'https://radio.plaza.one/mp3' },
+  { id: 'smooth-chill', name: 'Smooth Chill', genre: 'Chillout', e: '☁️', c: ['#24324a', '#c9d3de'], url: 'https://media-ssl.musicradio.com/ChillMP3' },
+  { id: 'piano-jazz', name: '0R Piano Jazz', genre: 'Piano jazz', e: '🎹', c: ['#2b1d14', '#c98b4f'], url: 'https://0nlineradio.radioho.st/lounge-piano-jazz-bar' },
+  { id: 'coffee', name: '0R Coffee Lounge', genre: 'Café lounge', e: '☕', c: ['#3b2416', '#d9a46a'], url: 'https://0nlineradio.radioho.st/lounge-coffee-bar-lounge' },
+  { id: 'airport', name: 'Airport Lounge', genre: 'Ambient', e: '✈️', c: ['#1e2638', '#9fb4ff'], url: 'https://az1.mediacp.eu/listen/airport-lounge-radio/radio.mp3' },
+  { id: 'sleep', name: '0R Music for Sleep', genre: 'Calm classical', e: '🌌', c: ['#0b0b1c', '#3d3a66'], url: 'https://0nlineradio.radioho.st/classical-classical-music-for-sleep' },
+];
+function radioHTML() {
+  return `<h4>Radio · ad-free, live</h4><div class="radio" id="radio">${STATIONS.map((st) => `<button class="station ${YT.P.mode === 'radio' && YT.P.station === st.id ? 'on' : ''}" data-act="radio" data-id="${st.id}" style="--a:${st.c[0]};--b:${st.c[1]}"><span class="st-ic">${st.e}</span><span class="st-tx"><b>${esc(st.name)}</b><small>${esc(st.genre)}</small></span></button>`).join('')}</div>
+    <div class="chips" style="margin-top:4px"><button class="chip ${YT.P.adFree ? 'on' : ''}" data-act="adfree" aria-pressed="${YT.P.adFree}">Ad-free YouTube ${YT.P.adFree ? 'on' : 'off'}</button></div>
+    <p class="mix-note">${YT.P.adFree ? `YouTube links play with no ads, video and all, through Invidious servers (open-source YouTube front ends). FOKUS finds the healthy public ones by itself${YT.server() ? `; right now it’s using <b>${esc(new URL(YT.server()).hostname)}</b>` : ''}. If none answers, YouTube’s own player takes over and you’ll see a note.` : 'YouTube links play in YouTube’s own player, which can show ads.'}</p>
+    ${YT.P.adFree ? `<details class="own-server"><summary>Use your own server${S.settings.invidious ? ` · ${esc(new URL(S.settings.invidious).hostname)}` : ''}</summary>
+      <p class="mix-note">Public servers come and go. The steadiest option is an Invidious server you or a friend runs; FOKUS will always try it first.</p>
+      <form class="row-input" data-form="inv-server" style="padding:0"><input placeholder="https://your-invidious.example" value="${esc(S.settings.invidious || '')}" aria-label="Your Invidious server"><button class="pill">Save</button></form>
+      ${S.settings.invidious ? '<button class="linkish" data-act="inv-clear">Stop using it</button>' : ''}</details>` : ''}`;
+}
+Object.assign(ACTS_EXTRA, {
+  radio: (el) => {
+    const st = STATIONS.find((x) => x.id === el.dataset.id); if (!st) return;
+    if (YT.P.mode === 'radio' && YT.P.station === st.id) { YT.toggle(); return; }
+    SND.attachMedia(YT.radioEl); // inside the tap, so the audio can start
+    YT.playRadio(st);
+  },
+  'inv-clear': () => { S.settings.invidious = ''; YT.P.ownServer = ''; save(); renderMixer(); toast('Back to public servers'); },
+  adfree: () => { S.settings.adFree = !YT.P.adFree; YT.P.adFree = S.settings.adFree; save(); renderMixer(); toast(YT.P.adFree ? 'Ad-free YouTube on' : 'YouTube links will use YouTube’s own player'); },
+});
+
 // ---------------------------------------------------------------- ambient sound mixer (lives in the Music panel)
 function renderMixer() {
   const v = S.settings.sounds || {};
   const vs = S.settings.visualiser || 'bars', cap = SND.tabCaptured();
-  $('#mixer').innerHTML = `<h4>Ambient sounds</h4>${SND.CHANNELS.map(([id, label]) => `<label class="mix-row">${label}<input type="range" min="0" max="1" step="0.01" value="${v[id] || 0}" data-input="snd" data-id="${id}" aria-label="${label} volume"></label>`).join('')}
+  $('#mixer').innerHTML = `${radioHTML()}<h4 style="margin-top:8px">Ambient sounds</h4>${SND.CHANNELS.map(([id, label]) => `<label class="mix-row">${label}<input type="range" min="0" max="1" step="0.01" value="${v[id] || 0}" data-input="snd" data-id="${id}" aria-label="${label} volume"></label>`).join('')}
     <h4 style="margin-top:8px">Visualiser</h4>
     <div class="chips">${[['bars', 'Bars'], ['wave', 'Wave'], ['off', 'Off']].map(([k, l]) => `<button class="chip ${vs === k ? 'on' : ''}" data-act="viz-style" data-v="${k}" aria-pressed="${vs === k}">${l}</button>`).join('')}
       <button class="chip ${cap ? 'on' : ''}" data-act="viz-tab" aria-pressed="${cap}">${cap ? 'Following YouTube · stop' : 'React to YouTube'}</button></div>
-    <p class="mix-note">${cap ? 'The bars, speaker and fairy lights follow the real music now.' : 'Ambient sounds drive the bars directly. YouTube plays in a sealed frame, so its bars are a gentle made-up groove unless you share this tab’s audio.'}</p>`;
+    <p class="mix-note">${cap ? 'The bars, speaker and fairy lights follow the real music now.' : 'Radio and ambient sounds drive the bars directly. YouTube’s sound can’t be read by the page, so its bars are a gentle made-up groove unless you share this tab’s audio.'}</p>`;
 }
 
 // ---------------------------------------------------------------- aesthetic studio
