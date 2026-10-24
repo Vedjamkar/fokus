@@ -668,7 +668,7 @@ export async function mountRoom(host, opts) {
     eyes.forEach((e) => e.traverse((o) => { o.castShadow = false; }));
     return { g, parts: { upper, head, arms, eyes, mug, screenM, lap } };
   }
-  const labelFor = (f) => [`${f.name}${f.status === 'focus' ? ` · ${f.clock || 'focusing'}` : f.status === 'break' ? ' · on break' : ''}`, f.status === 'focus' ? '#4ade80' : f.status === 'break' ? '#fbbf24' : '#9ca3af'];
+  const labelFor = (f) => [`${f.label || f.name}${f.status === 'focus' ? ` · ${f.clock || 'focusing'}` : f.status === 'break' ? ' · on break' : ''}`, f.status === 'focus' ? '#4ade80' : f.status === 'break' ? '#fbbf24' : '#9ca3af'];
   function setFriends(list) {
     const RUG = [rugG.position.x, rugG.position.z];
     const keep = new Set();
@@ -730,7 +730,7 @@ export async function mountRoom(host, opts) {
         if (a.act === 'heart') { nod = Math.sin(k * 3) * 0.12; if (Math.random() < dt * 5) { const wp2 = P.head.getWorldPosition(new THREE.Vector3()); puff(heartTex, wp2.x + (Math.random() - 0.5) * 0.5, wp2.y + 0.35, wp2.z, 0.28); } }
         if (a.act === 'coffee') { P.mug.visible = true; rx = lerp(rx, -2.2, ease); rz = lerp(rz, -0.5, ease); nod = -0.12 * ease; }
         if (a.act === 'sleepy') { eyesClosed = true; nod = (0.25 + Math.sin(k * 2.2) * 0.12) * ease; if (Math.random() < dt * 1.2) { const wp2 = P.head.getWorldPosition(new THREE.Vector3()); puff(zTex, wp2.x + 0.25, wp2.y + 0.4, wp2.z, 0.26); } }
-        if (fr.emoji) { const wp2 = P.head.getWorldPosition(new THREE.Vector3()); fr.emoji.position.set(wp2.x, wp2.y + 0.95 + Math.sin(k * 4) * 0.05, wp2.z); fr.emoji.material.opacity = Math.max(0, Math.min(1, k * 5, (L - k) * 3)); }
+        if (fr.emoji) { const wp2 = P.head.getWorldPosition(new THREE.Vector3()); fr.emoji.position.set(wp2.x, wp2.y + 1.45 + Math.sin(k * 4) * 0.05, wp2.z); fr.emoji.material.opacity = Math.max(0, Math.min(1, k * 5, (L - k) * 3)); }
         if (k >= L) { fr.act = null; if (fr.emoji) { scene.remove(fr.emoji); fr.emoji = null; } }
       }
       const s2 = Math.min(1, dt * 12);

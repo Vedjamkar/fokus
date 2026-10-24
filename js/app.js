@@ -855,7 +855,7 @@ const ROOM_ACTS = {
   'tg-act': (el) => {
     if (Date.now() - lastAct < 1200) return; // no spamming the room
     const A = ACTIONS.find((x) => x[0] === el.dataset.a);
-    if (A && TGM.act(A[0])) { lastAct = Date.now(); toast(`You ${A[3]} ${A[1]}`); el.animate?.([{ transform: 'scale(1.35)' }, { transform: 'scale(1)' }], { duration: 300 }); }
+    if (A && TGM.act(A[0])) { lastAct = Date.now(); if (!(ui.mode === 'room' && room?.friendAct(myId, A[0]))) toast(`You ${A[3]} ${A[1]}`); el.animate?.([{ transform: 'scale(1.35)' }, { transform: 'scale(1)' }], { duration: 300 }); }
   },
   'tg-join-pending': () => { const c = ui.pendingJoin; if (!S.settings.userName?.trim()) { $('[data-input="tg-name"]', popTogether)?.focus(); return toast('Add your name so friends know who joined'); } TGM.join(c, meMember()); },
   'tg-forget-invite': () => { ui.pendingJoin = ''; popTogether.innerHTML = togetherHTML(); },
@@ -1068,7 +1068,12 @@ TGM.onTimer((t, by) => {
   toast(`${by} ${t.running ? 'started' : 'paused'} the room timer`);
 });
 function friendClock(m) { return m.status !== 'idle' && m.endAt ? mmss(Math.max(0, Math.ceil((m.endAt - Date.now()) / 1000))) : ''; }
-function pushFriends() { room?.setFriends([...TGM.TG.members.values()].filter((m) => m.id !== myId).map((m) => ({ ...m, clock: friendClock(m) }))); }
+// once anyone else is here you sit with them too, in the first armchair, looking the way they see you
+function pushFriends() {
+  const others = [...TGM.TG.members.values()].filter((m) => m.id !== myId).sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0) || a.id.localeCompare(b.id));
+  const me = meMember();
+  room?.setFriends(others.length ? [{ ...me, label: 'You', clock: friendClock(me) }, ...others.map((m) => ({ ...m, clock: friendClock(m) }))] : []);
+}
 let hudHadBar = false;
 TGM.onChange(() => {
   const bar = TGM.TG.status === 'on';
