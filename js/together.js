@@ -1,147 +1,139 @@
-// Study together: a small live room over WebRTC (PeerJS's free public broker does the handshake).
-// The person who creates the room is the hub; everyone else connects to them and the hub relays.
+// Study together: a small live room relayed through free public MQTT brokers over secure websockets.
+// Direct browser-to-browser links (WebRTC) fail between different networks without a relay server,
+// and PeerJS's free one is unreliable, so every message goes through a broker instead. Everyone
+// connects to two brokers at once and drops duplicates, so one broker going down doesn't matter.
+// There's no host: the room lives as long as anyone is in it.
 
-const PREFIX = 'studyhaven-room-';
-// the room this tab is in survives a refresh: the host re-claims the same code, guests rejoin it
+const BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt'];
+const TOPIC = (room) => `fokus-v1/rooms/${room}`;
 const SESS = 'studyhaven:room';
-const remember = (v) => { try { v ? sessionStorage.setItem(SESS, JSON.stringify(v)) : sessionStorage.removeItem(SESS); } catch {} };
-const recalled = () => { try { return JSON.parse(sessionStorage.getItem(SESS)); } catch { return null; } };
-let retryTimer = 0, joinTimer = 0;
+const STALE = 35_000; // a member who hasn't been heard from in this long has left
+
 export const TG = { room: '', isHost: false, me: null, members: new Map(), chat: [], status: 'off', error: '' };
-let peer = null, hostConn = null;
-const conns = new Set();
 const subs = new Set();
 export const onChange = (fn) => subs.add(fn);
 const emit = () => subs.forEach((fn) => fn(TG));
 let onTimerFn = () => {};
 export const onTimer = (fn) => { onTimerFn = fn; };
 
-function loadPeer() {
-  if (window.Peer) return Promise.resolve();
+let clients = [], beat = 0, giveUp = 0;
+const seen = new Set(), seenOrder = [];
+const lastSeen = new Map();
+const remember = (v) => { try { v ? sessionStorage.setItem(SESS, JSON.stringify(v)) : sessionStorage.removeItem(SESS); } catch {} };
+const recalled = () => { try { return JSON.parse(sessionStorage.getItem(SESS)); } catch { return null; } };
+const mid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+const code = () => Array.from({ length: 5 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
+
+function loadMqtt() {
+  if (window.mqtt) return Promise.resolve();
   return new Promise((res, rej) => {
     const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
+    s.src = 'https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js';
     s.onload = res; s.onerror = () => rej(new Error('Couldn’t load the connection library. Check your internet.'));
     document.head.append(s);
   });
 }
-const code = () => Array.from({ length: 5 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
-const membersList = () => [...TG.members.values()];
 
-function broadcast(msg, except) { for (const c of conns) if (c !== except && c.open) c.send(msg); }
-function hubState() { broadcast({ t: 'state', members: membersList(), chat: TG.chat.slice(-60) }); }
+function send(msg) {
+  msg.mid ||= mid(); msg.from = TG.me?.id;
+  markSeen(msg.mid);
+  const body = JSON.stringify(msg);
+  for (const c of clients) if (c.connected) c.publish(TOPIC(TG.room), body, { qos: 0 });
+}
+function markSeen(id) { seen.add(id); seenOrder.push(id); if (seenOrder.length > 600) seen.delete(seenOrder.shift()); }
 
-function handle(msg, from) {
-  if (TG.isHost) {
-    if (msg.t === 'hello' || msg.t === 'update') { from._mid = msg.member.id; TG.members.set(msg.member.id, msg.member); hubState(); }
-    if (msg.t === 'chat') { TG.chat.push(msg.line); broadcast({ t: 'chat', line: msg.line }); }
-    if (msg.t === 'timer') { broadcast(msg, from); onTimerFn(msg.timer, msg.by); }
-  } else {
-    if (msg.t === 'state') { TG.members = new Map(msg.members.map((m) => [m.id, m])); TG.chat = msg.chat; }
-    if (msg.t === 'chat') TG.chat.push(msg.line);
-    if (msg.t === 'timer') onTimerFn(msg.timer, msg.by);
+function handle(raw) {
+  let msg; try { msg = JSON.parse(raw); } catch { return; }
+  if (!msg?.mid || seen.has(msg.mid)) return; // the same message arrives once per broker
+  markSeen(msg.mid);
+  if (msg.from === TG.me?.id) return;
+  if (msg.t === 'presence' && msg.member?.id) {
+    const isNew = !TG.members.has(msg.member.id);
+    TG.members.set(msg.member.id, msg.member); lastSeen.set(msg.member.id, Date.now());
+    if (isNew && msg.hello) { announce(); shareHistory(); } // say hi back so they see us straight away
   }
+  if (msg.t === 'bye') { TG.members.delete(msg.id); lastSeen.delete(msg.id); }
+  if (msg.t === 'chat' && msg.line) addChat(msg.line);
+  if (msg.t === 'history' && Array.isArray(msg.lines)) msg.lines.forEach(addChat);
+  if (msg.t === 'timer') onTimerFn(msg.timer, msg.by);
   emit();
 }
+function addChat(line) {
+  if (!line?.id || TG.chat.some((l) => l.id === line.id)) return;
+  TG.chat.push(line); TG.chat.sort((a, b) => a.at - b.at); TG.chat = TG.chat.slice(-80);
+}
+// whoever has been here longest catches newcomers up on the chat
+function shareHistory() {
+  const mine = TG.me?.joinedAt || 0;
+  const oldest = [...TG.members.values()].every((m) => m.id === TG.me.id || !m.joinedAt || m.joinedAt >= mine);
+  const lines = TG.chat.filter((l) => !l.sys).slice(-40);
+  if (oldest && lines.length) send({ t: 'history', lines });
+}
+function announce(hello) { send({ t: 'presence', member: TG.me, hello: !!hello }); }
 
-function wire(conn) {
-  conn.on('data', (m) => handle(m, conn));
-  conn.on('close', () => {
-    conns.delete(conn);
-    if (TG.isHost && conn._mid) { TG.members.delete(conn._mid); hubState(); emit(); }
-    // the host may just be refreshing: keep trying to get back in for a little while
-    if (!TG.isHost && conn === hostConn && TG.status !== 'off') rejoin(TG.room, TG.me, 0);
-  });
+function prune() {
+  const now = Date.now(); let changed = false;
+  for (const [id, at] of lastSeen) if (now - at > STALE) { TG.members.delete(id); lastSeen.delete(id); changed = true; }
+  if (changed) emit();
 }
 
-export async function create(me, reuse, tries = 0) {
-  await loadPeer();
-  leave(true);
-  TG.me = me; TG.isHost = true; TG.status = 'connecting'; TG.error = ''; emit();
-  const room = reuse || code();
-  peer = new window.Peer(PREFIX + room);
-  peer.on('open', () => {
-    TG.room = room; TG.status = 'on'; remember({ room, host: true });
-    TG.members = new Map([[me.id, me]]);
-    TG.chat = [{ from: 'FOKUS', text: reuse ? `Room ${room} is back open.` : `Room ${room} is open. Share the invite link with friends.`, at: Date.now(), sys: true }];
-    emit();
-  });
-  peer.on('connection', (c) => { conns.add(c); wire(c); c.on('open', hubState); });
-  peer.on('disconnected', () => { if (TG.status === 'on') try { peer.reconnect(); } catch {} });
-  peer.on('error', (e) => {
-    // after a refresh the broker can hold the old code for a few seconds
-    if (e.type === 'unavailable-id' && reuse && tries < 6) { TG.status = 'reconnecting'; emit(); retryTimer = setTimeout(() => create(me, reuse, tries + 1), 3000); return; }
-    if (TG.status === 'on' && e.type !== 'unavailable-id') return; // a friend's connection failing shouldn't close the room
-    TG.status = 'error'; TG.error = e.type === 'unavailable-id' ? 'That room code is taken. Try again.' : 'Couldn’t open a room. Check your internet and try again.'; remember(null); emit();
-  });
-}
-
-export async function join(room, me, quiet) {
-  await loadPeer();
+async function enter(room, me, created) {
+  await loadMqtt();
   leave(true);
   room = room.trim().toUpperCase();
-  TG.me = me; TG.isHost = false; TG.room = room; TG.status = quiet ? 'reconnecting' : 'connecting'; TG.error = ''; emit();
-  const fail = (msg) => { clearTimeout(joinTimer); if (quiet) return rejoin(room, me, quiet); TG.status = 'error'; TG.error = msg; remember(null); try { peer?.destroy(); } catch {} emit(); };
-  // a connection that never opens fires no error, so give up after a while instead of spinning forever
-  joinTimer = setTimeout(() => { if (TG.status !== 'on') fail('Couldn’t reach the room. Check the code, make sure the host still has FOKUS open, then try again. Some school or work Wi-Fi blocks this; a phone hotspot usually works.'); }, quiet ? 8000 : 15000);
-  peer = new window.Peer();
-  peer.on('open', () => {
-    hostConn = peer.connect(PREFIX + room, { reliable: true });
-    conns.add(hostConn); wire(hostConn);
-    hostConn.on('open', () => { clearTimeout(joinTimer); TG.status = 'on'; remember({ room, host: false }); hostConn.send({ t: 'hello', member: TG.me }); emit(); });
-    hostConn.on('error', () => fail('The connection to the room failed. Try again.'));
+  TG.me = { ...me, joinedAt: Date.now() }; TG.room = room; TG.isHost = !!created;
+  TG.members = new Map([[me.id, TG.me]]); TG.status = 'connecting'; TG.error = '';
+  TG.chat = [{ id: mid(), from: 'FOKUS', text: created ? `Room ${room} is open. Share the invite link with friends.` : `You joined room ${room}.`, at: Date.now(), sys: true }];
+  emit();
+  clients = BROKERS.map((url) => {
+    const c = window.mqtt.connect(url, { clientId: `fokus_${mid()}`, clean: true, keepalive: 30, reconnectPeriod: 3000, connectTimeout: 10_000 });
+    c.on('connect', () => {
+      c.subscribe(TOPIC(room), { qos: 0 }, () => {
+        if (TG.status !== 'on') { TG.status = 'on'; clearTimeout(giveUp); remember({ room }); emit(); }
+        announce(true);
+      });
+    });
+    c.on('message', (_t, payload) => handle(payload.toString()));
+    return c;
   });
-  peer.on('disconnected', () => { if (TG.status === 'on') try { peer.reconnect(); } catch {} });
-  peer.on('error', (e) => { if (TG.status === 'on' && e.type !== 'peer-unavailable') return; fail(e.type === 'peer-unavailable' ? `No room called ${room} is open right now.` : 'Couldn’t connect. Check your internet and try again.'); });
+  // if no broker answers at all, say so instead of spinning forever
+  giveUp = setTimeout(() => {
+    if (TG.status === 'on') return;
+    leave(true);
+    TG.status = 'error'; TG.room = room;
+    TG.error = 'Couldn’t reach the room servers. Check your internet; some school or work Wi-Fi blocks them, and a phone hotspot usually works.';
+    emit();
+  }, 15_000);
+  beat = setInterval(() => { if (TG.status === 'on') { announce(); prune(); } }, 10_000);
 }
-function rejoin(room, me, n) {
-  if (n >= 14) { TG.status = 'error'; TG.error = 'Lost the room: the host has left.'; TG.members.clear(); remember(null); emit(); return; }
-  TG.status = 'reconnecting'; emit();
-  clearTimeout(retryTimer);
-  retryTimer = setTimeout(() => join(room, me, n + 1), 2500);
-}
-// Background tabs get their timers throttled, so the broker can quietly drop a host without the
-// 'disconnected' event ever reaching us. Check now and then, and whenever the tab comes back.
-export const health = () => ({ status: TG.status, open: !!peer?.open, disconnected: !!peer?.disconnected, destroyed: !!peer?.destroyed });
-function watchdog() {
-  if (TG.status !== 'on' || !peer) return;
-  if (peer.destroyed) { if (TG.isHost) create(TG.me, TG.room); else rejoin(TG.room, TG.me, 0); }
-  else if (peer.disconnected) try { peer.reconnect(); } catch {}
-}
-setInterval(watchdog, 8000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) watchdog(); });
-// called once at startup: get back into the room this tab was in before a refresh
-export function resume(me) {
-  const r = recalled();
-  if (!r?.room) return false;
-  if (r.host) create(me, r.room); else join(r.room, me, 1);
-  return true;
-}
+
+export const create = (me) => enter(code(), me, true);
+export const join = (room, me) => enter(room, me, false);
+export function resume(me) { const r = recalled(); if (!r?.room) return false; join(r.room, me); return true; }
 
 export function updateMe(me) {
   if (TG.status !== 'on') return;
-  TG.me = me;
-  if (TG.isHost) { TG.members.set(me.id, me); hubState(); emit(); }
-  else hostConn?.open && hostConn.send({ t: 'update', member: me });
+  TG.me = { ...TG.me, ...me }; TG.members.set(me.id, TG.me);
+  announce(); emit();
 }
 export function say(text) {
   if (TG.status !== 'on' || !text.trim()) return;
-  const line = { from: TG.me.name, color: TG.me.color, text: text.trim().slice(0, 400), at: Date.now() };
-  if (TG.isHost) { TG.chat.push(line); broadcast({ t: 'chat', line }); emit(); }
-  else hostConn?.send({ t: 'chat', line });
+  const line = { id: mid(), from: TG.me.name, color: TG.me.color, text: text.trim().slice(0, 400), at: Date.now() };
+  addChat(line); send({ t: 'chat', line }); emit();
 }
 export function shareTimer(timer) {
   if (TG.status !== 'on') return;
-  const msg = { t: 'timer', timer, by: TG.me.name };
-  if (TG.isHost) broadcast(msg); else hostConn?.send(msg);
+  send({ t: 'timer', timer, by: TG.me.name });
 }
 export function leave(silent) {
-  clearTimeout(retryTimer); clearTimeout(joinTimer);
+  clearInterval(beat); clearTimeout(giveUp);
+  if (TG.status === 'on' && TG.me) send({ t: 'bye', id: TG.me.id });
+  const old = clients; clients = [];
+  setTimeout(() => old.forEach((c) => { try { c.end(true); } catch {} }), 150); // let the goodbye go out first
+  lastSeen.clear();
   if (!silent) remember(null);
-  for (const c of conns) try { c.close(); } catch {}
-  conns.clear(); hostConn = null;
-  try { peer?.destroy(); } catch {}
-  peer = null;
   Object.assign(TG, { room: '', isHost: false, members: new Map(), chat: [], status: 'off', error: '' });
   if (!silent) emit();
 }
+export const health = () => ({ status: TG.status, brokers: clients.filter((c) => c.connected).length });
+addEventListener('pagehide', () => { if (TG.status === 'on') send({ t: 'bye', id: TG.me.id }); });

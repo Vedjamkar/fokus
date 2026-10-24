@@ -1093,7 +1093,7 @@ function togetherHTML() {
       <button class="pill accent" data-act="tg-create" ${TG.status === 'connecting' ? 'disabled' : ''}>${TG.status === 'connecting' ? 'Connecting…' : 'Create a room'}</button>
       <form class="row-input" data-form="tg-join" style="padding:0"><input placeholder="Room code" value="${esc(ui.pendingJoin || '')}" maxlength="5" style="text-transform:uppercase;font-family:var(--f-mono);letter-spacing:.1em" aria-label="Room code"><button class="pill">Join</button></form>
       ${TG.error ? `<p style="margin:0;color:var(--bad);font-size:13.5px">${esc(TG.error)}</p>` : ''}
-      <p class="muted" style="margin:0;font-size:12.5px">Rooms connect browsers directly, with no accounts. Friends need to open this same app: host it online (GitHub Pages or Netlify) and send them the link. To try it now, open the app in a second browser window and join your own room.</p>
+      <p class="muted" style="margin:0;font-size:12.5px">No accounts needed: rooms run through free public relay servers, so they work across different Wi-Fi and phone networks. Anyone with the code can join, so don’t share it publicly. To try it alone, open FOKUS in a second window and join your own room.</p>
     </div>`;
   }
   const link = `${location.origin}${location.pathname}?room=${TG.room}`;
