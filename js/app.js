@@ -791,7 +791,7 @@ function roomHudHTML() {
       <button class="sq sm ${(S.settings.roomLabels ?? true) ? 'on' : ''}" data-act="room-labels" title="Show what each thing opens" aria-label="Toggle labels">${ic('tag')}</button>
       <button class="sq sm" data-act="room-reset" title="Reset the view" aria-label="Reset the view">${ic('reset')}</button>
     </div>
-    <p class="room-hint">${ui.arrange ? 'Arranging · drag furniture around · press R to rotate · click the move button when you’re done' : 'Drag to look around · scroll to zoom · click anything in the room'}</p></div>`;
+    ${TGM.TG.status === 'on' && !ui.arrange ? actBarHTML() : `<p class="room-hint">${ui.arrange ? 'Arranging · drag furniture around · press R to rotate · click the move button when you’re done' : 'Drag to look around · scroll to zoom · click anything in the room'}</p>`}</div>`;
 }
 function roomPick(id, data) {
   const go = (h) => { location.hash = h; };
@@ -852,6 +852,11 @@ const ROOM_ACTS = {
   'room-labels': (el) => { S.settings.roomLabels = !(S.settings.roomLabels ?? true); save(); room?.setLabels(S.settings.roomLabels); el.classList.toggle('on', S.settings.roomLabels); },
   'tg-create': () => { const me = meMember(); TGM.create(me); },
   'tg-leave': () => { TGM.leave(); },
+  'tg-act': (el) => {
+    if (Date.now() - lastAct < 1200) return; // no spamming the room
+    const A = ACTIONS.find((x) => x[0] === el.dataset.a);
+    if (A && TGM.act(A[0])) { lastAct = Date.now(); toast(`You ${A[3]} ${A[1]}`); el.animate?.([{ transform: 'scale(1.35)' }, { transform: 'scale(1)' }], { duration: 300 }); }
+  },
   'tg-join-pending': () => { const c = ui.pendingJoin; if (!S.settings.userName?.trim()) { $('[data-input="tg-name"]', popTogether)?.focus(); return toast('Add your name so friends know who joined'); } TGM.join(c, meMember()); },
   'tg-forget-invite': () => { ui.pendingJoin = ''; popTogether.innerHTML = togetherHTML(); },
   'tg-copy': async (el) => { try { await navigator.clipboard.writeText(el.dataset.text); toast('Copied'); } catch { toast(el.dataset.text); } },
@@ -1045,6 +1050,16 @@ function timerChanged(force) {
   if ((ui.syncTimer || force) && !applyingRemote) TGM.shareTimer({ mode: T.mode, running: T.running, endAt: T.endAt, left: T.left });
 }
 let applyingRemote = false;
+// ---------------------------------------------------------------- actions friends see on your character
+const ACTIONS = [['wave', '👋', 'Wave', 'waved'], ['cheer', '🎉', 'Cheer', 'cheered'], ['clap', '👏', 'Clap', 'clapped'], ['heart', '❤️', 'Send a heart', 'sent a heart'],
+  ['highfive', '✋', 'High five', 'wants a high five'], ['coffee', '☕', 'Coffee break', 'is having a coffee'], ['sleepy', '😴', 'Sleepy', 'is sleepy']];
+const actBarHTML = () => `<div class="act-bar" role="toolbar" aria-label="Actions your friends see">${ACTIONS.map(([k, e, l]) => `<button data-act="tg-act" data-a="${k}" title="${l}" aria-label="${l}">${e}</button>`).join('')}</div>`;
+let lastAct = 0;
+TGM.onAct((id, a, name) => {
+  const A = ACTIONS.find((x) => x[0] === a); if (!A) return;
+  const shown = ui.mode === 'room' && room?.friendAct(id, a);
+  if (!shown) toast(`${name} ${A[3]} ${A[1]}`);
+});
 TGM.onTimer((t, by) => {
   applyingRemote = true;
   T.mode = t.mode; T.running = t.running; T.endAt = t.endAt; T.left = t.left; saveT();
@@ -1054,7 +1069,10 @@ TGM.onTimer((t, by) => {
 });
 function friendClock(m) { return m.status !== 'idle' && m.endAt ? mmss(Math.max(0, Math.ceil((m.endAt - Date.now()) / 1000))) : ''; }
 function pushFriends() { room?.setFriends([...TGM.TG.members.values()].filter((m) => m.id !== myId).map((m) => ({ ...m, clock: friendClock(m) }))); }
+let hudHadBar = false;
 TGM.onChange(() => {
+  const bar = TGM.TG.status === 'on';
+  if (ui.mode === 'room' && bar !== hudHadBar) { hudHadBar = bar; const ae = document.activeElement?.dataset?.input === 't-task'; center.innerHTML = roomHudHTML(); if (ae) $('[data-input="t-task"]')?.focus(); }
   if (TGM.TG.status === 'on') ui.pendingJoin = '';
   if (ui.pop === 'together') {
     const chatIn = $('#tg-say'), had = document.activeElement === chatIn, val = chatIn?.value;
@@ -1106,6 +1124,7 @@ function togetherHTML() {
     <div class="tg-members">${members.map((m) => `<div class="tg-m"><span class="av" style="background:${esc(m.color)}">${esc((m.name || '?')[0].toUpperCase())}</span>
       <span class="who"><b>${esc(m.name)}${m.id === myId ? ' (you)' : ''}</b><small>${esc([m.subject, m.task].filter(Boolean).join(' · ') || 'No task set')}</small></span>
       <span class="st ${m.status}" data-fclock="${m.id}">${statusText(m)}</span></div>`).join('')}</div>
+    ${actBarHTML()}
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="pill accent" data-act="tg-group">Start a group focus</button>
       <label class="switch" style="font-size:13.5px"><input type="checkbox" data-act="tg-sync" ${ui.syncTimer ? 'checked' : ''}> Keep timers in sync</label></div>

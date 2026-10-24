@@ -19,6 +19,8 @@ export const onChange = (fn) => subs.add(fn);
 const emit = () => subs.forEach((fn) => fn(TG));
 let onTimerFn = () => {};
 export const onTimer = (fn) => { onTimerFn = fn; };
+let onActFn = () => {};
+export const onAct = (fn) => { onActFn = fn; };
 
 let clients = [], beat = 0, giveUp = 0;
 const seen = new Set(), seenOrder = [];
@@ -106,6 +108,7 @@ function handle(raw) {
   if (msg.t === 'chat' && msg.line) addChat(msg.line);
   if (msg.t === 'history' && Array.isArray(msg.lines)) msg.lines.forEach(addChat);
   if (msg.t === 'timer') onTimerFn(msg.timer, msg.by);
+  if (msg.t === 'act' && typeof msg.act === 'string') { lastSeen.set(msg.from, Date.now()); onActFn(msg.from, msg.act.slice(0, 20), TG.members.get(msg.from)?.name || 'Someone'); }
   emit();
 }
 function addChat(line) {
@@ -162,6 +165,12 @@ export function say(text) {
   if (TG.status !== 'on' || !text.trim()) return;
   const line = { id: mid(), from: TG.me.name, color: TG.me.color, text: text.trim().slice(0, 400), at: Date.now() };
   addChat(line); send({ t: 'chat', line }); emit();
+}
+// a quick action (wave, cheer, …) that everyone else sees on your character
+export function act(a) {
+  if (TG.status !== 'on') return false;
+  send({ t: 'act', act: a });
+  return true;
 }
 export function shareTimer(timer) {
   if (TG.status !== 'on') return;

@@ -581,69 +581,165 @@ export async function mountRoom(host, opts) {
     if (cat.visible) { wakeCat(); catMode = 'chase'; chaseBats = 1 + Math.floor(Math.random() * 3); setTimeout(() => SND.meow('small'), 250); }
   }
 
-  // ---------- friends sit on cushions on the rug
+  // ---------- friends: each gets an armchair around the rug and a little seated character
+  // Characters are kept per person and only rebuilt when their look changes, so actions can animate.
   const friendGroup = new THREE.Group(); scene.add(friendGroup);
-  const SEAT_OFFSETS = [[1.8, -0.45], [-1.9, 0.35], [1.1, 1.65], [-1.1, -1.55]];
-  function labelSprite(text, color) {
-    const t = canvasTex(512, 128, (g, w, h) => { g.font = font(700, 44); const tw = g.measureText(text).width; g.fillStyle = 'rgba(15,14,24,.82)'; roundRect(g, w / 2 - tw / 2 - 28, 18, tw + 56, 84, 42); g.fill(); g.fillStyle = color; g.beginPath(); g.arc(w / 2 - tw / 2 - 6, 60, 9, 0, 7); g.fill(); g.fillStyle = '#fff'; g.textAlign = 'left'; g.fillText(text, w / 2 - tw / 2 + 10, 76); });
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t.tex, transparent: true, depthWrite: false, depthTest: false })); sp.scale.set(2.2, 0.55, 1); sp.renderOrder = 10;
-    return sp;
+  // seats on the far side of the rug, so friends face the rug and you see their faces from the camera
+  const SEAT_OFFSETS = [[-2.45, -0.45], [-0.3, -1.95], [1.8, -1.75], [-2.35, 1.2]];
+  const friends = new Map(); // id → { g, sig, parts, label, labelText, act }
+  function labelTex(text, color) {
+    return canvasTex(512, 128, (g, w, h) => { g.font = font(700, 44); const tw = g.measureText(text).width; g.fillStyle = 'rgba(15,14,24,.82)'; roundRect(g, w / 2 - tw / 2 - 28, 18, tw + 56, 84, 42); g.fill(); g.fillStyle = color; g.beginPath(); g.arc(w / 2 - tw / 2 - 6, 60, 9, 0, 7); g.fill(); g.fillStyle = '#fff'; g.textAlign = 'left'; g.fillText(text, w / 2 - tw / 2 + 10, 76); });
   }
-  function setFriends(list) {
-    friendGroup.clear();
-    pickables.splice(0, pickables.length, ...pickables.filter((p) => p.userData.pick.id !== 'friend'));
-    const RUG = [rugG.position.x, rugG.position.z];
-    list.slice(0, SEAT_OFFSETS.length).forEach((f, i) => {
-      const x = RUG[0] + SEAT_OFFSETS[i][0], z = RUG[1] + SEAT_OFFSETS[i][1];
-      const g = new THREE.Group(); at(g, x, 0, z);
-      // a little seated character; local +z faces the middle of the rug
-      const hash = [...(f.name || '?')].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7);
-      const c = new THREE.Color(f.color || '#4fb3a9');
-      const skin = mat([0xf3d2b3, 0xe8b98f, 0xc68b62, 0x9a6440, 0x6e4529][hash % 5], { roughness: 0.7 });
-      const hairM = mat([0x2b1d14, 0x4a2c1a, 0x111111, 0x8a5a2b, 0xd9b26a, 0x6b2a2a][(hash >> 3) % 6], { roughness: 0.85 });
-      const shirt = mat(c, { roughness: 0.8 });
-      const pants = mat(new THREE.Color(c).lerp(new THREE.Color('#1d1a2b'), 0.65), { roughness: 0.85 });
-      // cushion with a tuft in the middle
-      const cushion = at(new THREE.Mesh(new RoundedBoxGeometry(1.15, 0.26, 1.15, 4, 0.12), mat(0xf2ede6, { roughness: 1 })), 0, 0.13, 0); cushion.castShadow = cushion.receiveShadow = true; g.add(cushion);
-      // crossed legs
-      [-1, 1].forEach((sd) => {
-        const leg = at(new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.42, 6, 10), pants), sd * 0.12, 0.38, 0.12);
-        leg.rotation.z = Math.PI / 2; leg.rotation.y = sd * 0.5; leg.castShadow = true; g.add(leg);
-        g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), mat(0xeeeeee)), -sd * 0.2, 0.36, 0.3)); // socks peeking out
-      });
-      // torso, leaning in a little
-      const torso = at(new THREE.Mesh(new THREE.CapsuleGeometry(0.27, 0.34, 6, 14), shirt), 0, 0.82, -0.04); torso.rotation.x = 0.1; torso.scale.set(1, 1, 0.85); torso.castShadow = true; g.add(torso);
-      // arms reaching to the keyboard, with hands
-      [-1, 1].forEach((sd) => {
-        const arm = at(new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.34, 4, 8), shirt), sd * 0.3, 0.86, 0.12);
-        arm.rotation.x = 1.0; arm.rotation.z = sd * 0.25; arm.castShadow = true; g.add(arm);
-        g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), skin), sd * 0.2, 0.66, 0.36));
-      });
-      // head: face, eyes, blush, hair
-      const headG = new THREE.Group(); at(headG, 0, 1.42, 0.02); g.add(headG);
-      const headM = new THREE.Mesh(new THREE.SphereGeometry(0.29, 20, 16), skin); headM.castShadow = true; headG.add(headM);
-      const eyeM = new THREE.MeshBasicMaterial({ color: 0x1d1a2b });
-      [-1, 1].forEach((sd) => {
-        const eye = at(new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), eyeM), sd * 0.1, -0.02, 0.265); eye.scale.y = 1.35; headG.add(eye);
-        const blush = at(new THREE.Mesh(new THREE.CircleGeometry(0.045, 14), new THREE.MeshBasicMaterial({ color: 0xff8fa3, transparent: true, opacity: 0.45 })), sd * 0.17, -0.09, 0.255);
-        blush.rotation.y = sd * 0.55; headG.add(blush);
-      });
-      const cap = at(new THREE.Mesh(new THREE.SphereGeometry(0.31, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.55), hairM), 0, 0.03, -0.035); cap.rotation.x = -0.35; headG.add(cap);
-      const fringe = at(new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), hairM), (hash % 2 ? 1 : -1) * 0.05, 0.17, 0.17); fringe.scale.set(1.25, 0.45, 0.6); fringe.rotation.z = (hash % 2 ? -1 : 1) * 0.25; headG.add(fringe);
-      if ((hash >> 5) % 3 === 0) headG.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 10), hairM), 0, 0.12, -0.3)); // a bun for some
-      // laptop on their lap: hinge at the far side, screen facing them
-      const lap = new THREE.Group(); at(lap, 0, 0.56, 0.42); lap.rotation.x = -0.12;
-      lap.add(box(0.5, 0.03, 0.34, shell, 0.01));
-      const lid = new THREE.Group(); at(lid, 0, 0.015, 0.17); lid.rotation.x = 0.35; lap.add(lid);
-      lid.add(at(box(0.5, 0.34, 0.025, shell, 0.01), 0, 0.17, 0));
-      const glowOn = f.status === 'focus' ? 0.9 : 0.25;
-      lid.add(at(new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.28), new THREE.MeshStandardMaterial({ color: 0x1b1640, emissive: c, emissiveIntensity: glowOn })).rotateY(Math.PI), 0, 0.17, -0.014));
-      g.add(lap);
-      g.rotation.y = Math.atan2(RUG[0] - x, RUG[1] - z); // face the middle of the rug
-      const label = labelSprite(`${f.name}${f.status === 'focus' ? ` · ${f.clock || 'focusing'}` : f.status === 'break' ? ' · on break' : ''}`, f.status === 'focus' ? '#4ade80' : f.status === 'break' ? '#fbbf24' : '#9ca3af');
-      at(label, x, 2.15, z); friendGroup.add(label);
-      friendGroup.add(pick(g, 'friend', { name: f.name, task: f.task, status: f.status }));
+  function emojiSprite(ch) {
+    const t = canvasTex(256, 256, (g, w, h) => {
+      g.fillStyle = 'rgba(255,253,248,.96)'; g.beginPath(); g.arc(w / 2, h / 2 - 10, 92, 0, 7); g.fill();
+      g.beginPath(); g.moveTo(w / 2 - 22, h - 46); g.lineTo(w / 2, h - 8); g.lineTo(w / 2 + 18, h - 46); g.fill();
+      g.font = '110px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(ch, w / 2, h / 2 - 4);
     });
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t.tex, transparent: true, depthWrite: false, depthTest: false }));
+    sp.scale.setScalar(0.85); sp.renderOrder = 11; return sp;
+  }
+  const hashOf = (str) => [...(str || '?')].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7);
+  function buildFriend(f) {
+    const hash = hashOf(f.name);
+    const c = new THREE.Color(f.color || '#4fb3a9');
+    const g = new THREE.Group();
+    const skin = mat([0xf6d5b8, 0xe9bb92, 0xc98d64, 0x9c6743, 0x6f472c][hash % 5], { roughness: 0.62 });
+    const hairM = mat([0x2b1d14, 0x4a2c1a, 0x16131a, 0x8a5a2b, 0xd9b26a, 0x7a2f3a, 0x3d3a66][(hash >> 3) % 7], { roughness: 0.75 });
+    const shirt = mat(c, { roughness: 0.75 });
+    const pants = mat(new THREE.Color(c).lerp(new THREE.Color('#1d1a2b'), 0.7), { roughness: 0.85 });
+    const shoe = mat(0xf2ede6, { roughness: 0.6 });
+    // armchair: wooden legs, a soft seat and back, rounded arms, all a calm tint of their colour
+    const fabric = mat(new THREE.Color(c).lerp(new THREE.Color('#e8e1d6'), 0.55), { roughness: 0.95 });
+    const legW = mat(0x6e4630, { roughness: 0.5 });
+    [[-0.42, -0.36], [0.42, -0.36], [-0.42, 0.36], [0.42, 0.36]].forEach(([x, z]) => g.add(at(cyl(0.04, 0.03, 0.42, legW, 8), x, 0.21, z)));
+    g.add(at(box(1.05, 0.22, 0.95, fabric, 0.1), 0, 0.52, 0));
+    g.add(at(box(0.92, 0.12, 0.8, fabric, 0.06), 0, 0.68, 0.04)); // seat cushion
+    const back = at(box(1.05, 0.95, 0.2, fabric, 0.1), 0, 1.05, -0.4); back.rotation.x = -0.12; g.add(back);
+    [-1, 1].forEach((sd) => g.add(at(box(0.18, 0.42, 0.88, fabric, 0.08), sd * 0.52, 0.8, 0)));
+    // the character, sitting: everything above the hips can move
+    const upper = new THREE.Group(); at(upper, 0, 0.78, -0.05); g.add(upper);
+    [-1, 1].forEach((sd) => {
+      const thigh = at(new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.3, 6, 10), pants), sd * 0.13, 0.84, 0.16); thigh.rotation.x = Math.PI / 2; g.add(thigh);
+      const shin = at(new THREE.Mesh(new THREE.CapsuleGeometry(0.095, 0.38, 6, 10), pants), sd * 0.13, 0.55, 0.42); g.add(shin);
+      const sh = at(box(0.18, 0.12, 0.3, shoe, 0.05), sd * 0.13, 0.3, 0.5); g.add(sh);
+    });
+    const torso = at(new THREE.Mesh(new THREE.CapsuleGeometry(0.25, 0.32, 8, 16), shirt), 0, 0.36, 0); torso.scale.set(1.05, 1, 0.82); upper.add(torso);
+    // arms hang from shoulder pivots so they can wave, clap and cheer
+    const arms = [-1, 1].map((sd) => {
+      const pv = new THREE.Group(); at(pv, sd * 0.3, 0.58, 0); upper.add(pv);
+      pv.add(at(new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.3, 4, 10), shirt), 0, -0.22, 0));
+      pv.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 10), skin), 0, -0.44, 0));
+      return pv;
+    });
+    const mug = new THREE.Group(); mug.visible = false; at(mug, 0, -0.5, 0.06);
+    mug.add(cyl(0.065, 0.06, 0.13, mat(0xf2ede6, { roughness: 0.4 }), 14)); arms[1].add(mug);
+    // big friendly head
+    const head = new THREE.Group(); at(head, 0, 0.98, 0.02); upper.add(head);
+    head.add(new THREE.Mesh(new THREE.SphereGeometry(0.34, 24, 18), skin));
+    [-1, 1].forEach((sd) => head.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), skin), sd * 0.33, -0.02, 0)));
+    const eyeM = new THREE.MeshBasicMaterial({ color: 0x1d1a2b }), shineM = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const eyes = [-1, 1].map((sd) => {
+      const e = new THREE.Group(); at(e, sd * 0.12, -0.01, 0.305); head.add(e);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.048, 12, 10), eyeM); pupil.scale.set(1, 1.25, 0.6); e.add(pupil);
+      e.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.015, 8, 6), shineM), 0.015, 0.025, 0.03));
+      const blush = at(new THREE.Mesh(new THREE.CircleGeometry(0.05, 16), new THREE.MeshBasicMaterial({ color: 0xff8fa3, transparent: true, opacity: 0.5 })), sd * 0.08, -0.09, -0.01);
+      e.add(blush);
+      return e;
+    });
+    const smile = at(new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.012, 6, 16, Math.PI), eyeM), 0, -0.12, 0.315); smile.rotation.z = Math.PI; head.add(smile);
+    // hair: a cap with a side-swept fringe; some get a bun, some longer hair at the back
+    const cap = at(new THREE.Mesh(new THREE.SphereGeometry(0.36, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.52), hairM), 0, 0.03, -0.04); cap.rotation.x = -0.3; head.add(cap);
+    const fringe = at(new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 12), hairM), (hash % 2 ? 1 : -1) * 0.07, 0.2, 0.18); fringe.scale.set(1.25, 0.42, 0.62); fringe.rotation.z = (hash % 2 ? -1 : 1) * 0.3; head.add(fringe);
+    const style = (hash >> 5) % 3;
+    if (style === 0) head.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 12), hairM), 0, 0.2, -0.3));
+    if (style === 1) { const long = at(new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.25, 6, 16), hairM), 0, -0.18, -0.12); long.scale.set(1.05, 1, 0.7); head.add(long); }
+    // headphones in their colour
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.37, 0.025, 8, 28, Math.PI), mat(0x2b2838, { roughness: 0.4 })); at(band, 0, 0.02, -0.02); head.add(band);
+    [-1, 1].forEach((sd) => { const cup = at(cyl(0.1, 0.1, 0.08, mat(c, { roughness: 0.4 }), 18), sd * 0.36, 0, 0); cup.rotation.z = Math.PI / 2; head.add(cup); });
+    // laptop on their lap, screen facing them
+    const lap = new THREE.Group(); at(lap, 0, 0.98, 0.3); lap.rotation.x = -0.08; g.add(lap);
+    lap.add(box(0.5, 0.03, 0.34, shell, 0.01));
+    const lid = new THREE.Group(); at(lid, 0, 0.015, 0.17); lid.rotation.x = 0.3; lap.add(lid);
+    lid.add(at(box(0.5, 0.34, 0.025, shell, 0.01), 0, 0.17, 0));
+    const screenM = new THREE.MeshStandardMaterial({ color: 0x1b1640, emissive: c, emissiveIntensity: f.status === 'focus' ? 0.9 : 0.25 });
+    lid.add(at(new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.28), screenM).rotateY(Math.PI), 0, 0.17, -0.014));
+    g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    eyes.forEach((e) => e.traverse((o) => { o.castShadow = false; }));
+    return { g, parts: { upper, head, arms, eyes, mug, screenM, lap } };
+  }
+  const labelFor = (f) => [`${f.name}${f.status === 'focus' ? ` · ${f.clock || 'focusing'}` : f.status === 'break' ? ' · on break' : ''}`, f.status === 'focus' ? '#4ade80' : f.status === 'break' ? '#fbbf24' : '#9ca3af'];
+  function setFriends(list) {
+    const RUG = [rugG.position.x, rugG.position.z];
+    const keep = new Set();
+    list.slice(0, SEAT_OFFSETS.length).forEach((f, i) => {
+      keep.add(f.id);
+      const sig = `${f.name}|${f.color}|${f.status}`;
+      let fr = friends.get(f.id);
+      if (!fr || fr.sig !== sig) {
+        if (fr) { friendGroup.remove(fr.g, fr.label); }
+        const built = buildFriend(f);
+        const lt = labelTex(...labelFor(f));
+        const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: lt.tex, transparent: true, depthWrite: false, depthTest: false })); label.scale.set(2.2, 0.55, 1); label.renderOrder = 10;
+        fr = { ...built, sig, label, lt, labelText: labelFor(f).join(), act: fr?.act || null };
+        friends.set(f.id, fr);
+        friendGroup.add(pick(fr.g, 'friend', { id: f.id, name: f.name, task: f.task, status: f.status }), label);
+      }
+      fr.g.userData.pick.data = { id: f.id, name: f.name, task: f.task, status: f.status };
+      const text = labelFor(f);
+      if (text.join() !== fr.labelText) { fr.labelText = text.join(); const old = fr.label.material.map; fr.lt = labelTex(...text); fr.label.material.map = fr.lt.tex; fr.label.material.needsUpdate = true; old.dispose(); }
+      const x = RUG[0] + SEAT_OFFSETS[i][0], z = RUG[1] + SEAT_OFFSETS[i][1];
+      fr.g.position.set(x, 0, z);
+      fr.g.rotation.y = Math.atan2(RUG[0] - x, RUG[1] - z); // face the middle of the rug
+      fr.label.position.set(x, 2.55, z);
+      fr.status = f.status;
+    });
+    for (const [id, fr] of friends) if (!keep.has(id)) { friendGroup.remove(fr.g, fr.label); if (fr.emoji) scene.remove(fr.emoji); friends.delete(id); }
+    pickables.splice(0, pickables.length, ...pickables.filter((p) => p.userData.pick.id !== 'friend' || [...friends.values()].some((fr) => fr.g === p)));
+  }
+  // ---------- actions: wave, cheer, clap, heart, highfive, coffee, sleepy
+  const ACT_EMOJI = { wave: '👋', cheer: '🎉', clap: '👏', heart: '❤️', highfive: '✋', coffee: '☕', sleepy: '😴' };
+  const ACT_LEN = { wave: 2.4, cheer: 2.4, clap: 2.2, heart: 2.6, highfive: 2.2, coffee: 3.2, sleepy: 4 };
+  const confettiTex = ['#ff7aa2', '#ffc46b', '#7ad7ff', '#b39bff', '#4ade80'].map((col) => glyph('■', col));
+  function friendAct(id, act) {
+    const fr = friends.get(id);
+    if (!fr || !ACT_EMOJI[act]) return false;
+    fr.act = { act, t: 0 };
+    if (fr.emoji) scene.remove(fr.emoji);
+    fr.emoji = emojiSprite(ACT_EMOJI[act]); scene.add(fr.emoji);
+    if (act === 'clap') [0, 0.22, 0.44, 0.66, 0.88].forEach((d) => setTimeout(() => SND.clack(0.18), d * 1000));
+    if (act === 'cheer') SND.chime(4, 0.12);
+    if (act === 'highfive') setTimeout(() => SND.clack(0.4), 450);
+    return true;
+  }
+  const lerp = (a, b, k) => a + (b - a) * k;
+  function stepFriends(dt, t) {
+    for (const fr of friends.values()) {
+      const P = fr.parts, a = fr.act;
+      let lx = -0.95, lz = 0.12, rx = -0.95, rz = -0.12, bob = 0, nod = 0, eyesClosed = false;
+      if (fr.status === 'focus') { lx += Math.sin(t * 18) * 0.06; rx += Math.sin(t * 18 + 1.7) * 0.06; nod = Math.sin(t * 1.3) * 0.04; }
+      else nod = Math.sin(t * 0.9) * 0.05;
+      P.mug.visible = false;
+      if (a) {
+        a.t += dt; const k = a.t, L = ACT_LEN[a.act], ease = Math.min(1, k * 4, (L - k) * 4);
+        // rotation.z swings an arm sideways: + moves the right arm outward, − moves the left arm outward
+        if (a.act === 'wave') { rx = lerp(rx, -2.6, ease); rz = lerp(rz, 0.55 + Math.sin(k * 12) * 0.35, ease); }
+        if (a.act === 'highfive') { rx = lerp(rx, -2.95, ease); rz = lerp(rz, 0.35, ease); bob = Math.sin(Math.min(1, k * 2) * Math.PI) * 0.08; }
+        if (a.act === 'cheer') { lx = rx = lerp(-0.95, -2.9, ease); lz = lerp(lz, -0.55, ease); rz = lerp(rz, 0.55, ease); bob = Math.abs(Math.sin(k * 9)) * 0.14 * ease; if (Math.random() < dt * 22) { const wp2 = P.head.getWorldPosition(new THREE.Vector3()); puff(confettiTex[Math.floor(Math.random() * 5)], wp2.x + (Math.random() - 0.5) * 0.9, wp2.y + 0.2, wp2.z + (Math.random() - 0.5) * 0.6, 0.12); } }
+        if (a.act === 'clap') { lx = rx = lerp(-0.95, -1.45, ease); const cl = (Math.sin(k * 28) * 0.5 + 0.5) * 0.35; lz = lerp(lz, 0.25 + cl, ease); rz = lerp(rz, -0.25 - cl, ease); }
+        if (a.act === 'heart') { nod = Math.sin(k * 3) * 0.12; if (Math.random() < dt * 5) { const wp2 = P.head.getWorldPosition(new THREE.Vector3()); puff(heartTex, wp2.x + (Math.random() - 0.5) * 0.5, wp2.y + 0.35, wp2.z, 0.28); } }
+        if (a.act === 'coffee') { P.mug.visible = true; rx = lerp(rx, -2.2, ease); rz = lerp(rz, -0.5, ease); nod = -0.12 * ease; }
+        if (a.act === 'sleepy') { eyesClosed = true; nod = (0.25 + Math.sin(k * 2.2) * 0.12) * ease; if (Math.random() < dt * 1.2) { const wp2 = P.head.getWorldPosition(new THREE.Vector3()); puff(zTex, wp2.x + 0.25, wp2.y + 0.4, wp2.z, 0.26); } }
+        if (fr.emoji) { const wp2 = P.head.getWorldPosition(new THREE.Vector3()); fr.emoji.position.set(wp2.x, wp2.y + 0.95 + Math.sin(k * 4) * 0.05, wp2.z); fr.emoji.material.opacity = Math.max(0, Math.min(1, k * 5, (L - k) * 3)); }
+        if (k >= L) { fr.act = null; if (fr.emoji) { scene.remove(fr.emoji); fr.emoji = null; } }
+      }
+      const s2 = Math.min(1, dt * 12);
+      P.arms[0].rotation.x = lerp(P.arms[0].rotation.x, lx, s2); P.arms[0].rotation.z = lerp(P.arms[0].rotation.z, lz, s2);
+      P.arms[1].rotation.x = lerp(P.arms[1].rotation.x, rx, s2); P.arms[1].rotation.z = lerp(P.arms[1].rotation.z, rz, s2);
+      P.upper.position.y = 0.78 + bob + Math.sin(t * 1.6) * 0.008;
+      P.head.rotation.x = lerp(P.head.rotation.x, nod, s2);
+      P.eyes.forEach((e) => { e.scale.y = lerp(e.scale.y, eyesClosed || (Math.sin(t * 0.7 + fr.g.position.x) > 0.995) ? 0.12 : 1, Math.min(1, dt * 18)); });
+    }
   }
 
   // ---------- floating labels: what each thing opens
@@ -971,6 +1067,7 @@ export async function mountRoom(host, opts) {
     else notes.forEach((n) => { n.material.opacity = 0; });
     stepToys(dt, t);
     stepCat(dt, t);
+    stepFriends(dt, t);
     // music → fairy lights, speaker LEDs and woofer
     const v = VIZ.sample(t, S.musicPlaying);
     bulbs.forEach((b, i) => { b.material.emissiveIntensity = 1.4 + Math.sin(t * 2 + i) * 0.6 + v.bins[(i * 3) % VIZ.BINS] * 3.2; });
@@ -1032,6 +1129,7 @@ export async function mountRoom(host, opts) {
       if ('bright' in next) { bright = next.bright; applyExposure(); }
     },
     setFriends,
+    friendAct,
     say(text) { if (!cat.visible) return false; say(text); if (catMode === 'sleep') { catMode = 'idle'; catPoke = clockT.getElapsedTime(); } return true; },
     setLabels(on) { tags.visible = on; },
     setArrange(on) { arrange = on; setGlow(null, false); hovered = null; tip.hidden = true; if (!on) endDrag(); },
