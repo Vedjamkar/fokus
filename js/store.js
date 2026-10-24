@@ -14,7 +14,7 @@ export const addDays = (n, base = new Date()) => { const d = new Date(base); d.s
 export const parseISO = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 
 export const DEFAULT_SETTINGS = {
-  appName: 'Study Haven',
+  appName: 'FOKUS',
   tagline: 'Every lecture, note and deadline in one quiet place.',
   scene: 'aurora', font: 'default', noteStyle: 'ruled', quotes: true,
   termStart: addDays(-45), termEnd: addDays(67),
@@ -154,10 +154,16 @@ function load() {
       for (const k of ['subjects', 'lectures', 'due', 'resources', 'courses', 'embeds', 'sessions']) s[k] ||= [];
       s.music ||= { saved: [], volume: 60 };
       s.stickers ||= []; s.stickerPack ||= [];
+      if (s.settings.appName === 'Study Haven') s.settings.appName = 'FOKUS'; // the app's old name
       return s;
     }
   } catch (e) { console.warn('Could not read saved data', e); }
-  return seed();
+  return blank();
+}
+// a fresh start: no example subjects or deadlines, just the music presets
+function blank() {
+  return { v: 1, cleaned: true, settings: structuredClone(DEFAULT_SETTINGS), subjects: [], lectures: [], due: [], resources: [], courses: [], embeds: [], sessions: [],
+    music: { saved: PRESETS.map((p) => ({ id: uid(), ...p })), volume: 60, last: null }, stickers: [], stickerPack: [] };
 }
 
 export const S = {}; // filled at the bottom of this file, after the example notes exist
@@ -170,6 +176,33 @@ export function replaceAll(next) {
   save();
 }
 export function resetToExamples() { replaceAll(seed()); }
+export function startOver() { replaceAll(blank()); }
+
+// One-time cleanup for data that began with the old example set. Example items that are still as they
+// came are removed; an example subject stays if anything of yours points at it, and so does an example
+// note you've edited. A copy of everything is kept first, under BACKUP_KEY, so it can be put back.
+export const BACKUP_KEY = 'studyhaven:before-cleanup';
+export function removePlaceholders() {
+  if (S.cleaned) return 0;
+  try { localStorage.setItem(BACKUP_KEY, JSON.stringify(S)); } catch {}
+  const before = ['subjects', 'lectures', 'due', 'resources', 'courses', 'embeds', 'sessions'].reduce((n, k) => n + S[k].length, 0);
+  // an example note counts as yours once it's been edited after the examples were made
+  const born = Math.max(0, ...S.resources.filter((r) => r.example).map((r) => r.updated || 0));
+  S.resources = S.resources.filter((r) => !r.example || (r.updated || 0) > born + 60_000);
+  S.resources.forEach((r) => { delete r.example; });
+  for (const k of ['lectures', 'due', 'courses', 'embeds', 'sessions']) S[k] = S[k].filter((x) => !x.example);
+  const used = new Set([...S.resources, ...S.due, ...S.lectures, ...S.sessions].map((x) => x.subjectId).filter(Boolean));
+  S.subjects = S.subjects.filter((x) => !x.example || used.has(x.id));
+  S.subjects.forEach((x) => { delete x.example; });
+  const ids = new Set(S.subjects.map((x) => x.id));
+  S.resources.forEach((r) => { if (r.subjectId && !ids.has(r.subjectId)) r.subjectId = ''; });
+  S.cleaned = true;
+  save();
+  return before - ['subjects', 'lectures', 'due', 'resources', 'courses', 'embeds', 'sessions'].reduce((n, k) => n + S[k].length, 0);
+}
+export function restoreBeforeCleanup() {
+  try { const b = JSON.parse(localStorage.getItem(BACKUP_KEY)); if (!b) return false; replaceAll({ ...b, cleaned: true }); return true; } catch { return false; }
+}
 export function clearExamples() {
   for (const k of ['subjects', 'lectures', 'due', 'resources', 'courses', 'embeds', 'sessions', 'stickers']) S[k] = S[k].filter((x) => !x.example);
   const ids = new Set(S.subjects.map((s) => s.id));

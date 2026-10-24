@@ -1,6 +1,6 @@
 import {
   S, save, uid, todayISO, addDays, parseISO, iso, subjectById, topicsIn, pct, counts, findNode, chaptersOf,
-  putFile, getFile, delFile, replaceAll, clearExamples, resetToExamples, hasExamples,
+  putFile, getFile, delFile, replaceAll, clearExamples, resetToExamples, hasExamples, startOver, removePlaceholders, restoreBeforeCleanup, BACKUP_KEY,
 } from './store.js';
 import { renderNote, toggleTask } from './md.js';
 import * as YT from './player.js';
@@ -38,6 +38,7 @@ const ICONS = {
   shrink: 'M4 14h6v6M10 14l-7 7M20 10h-6V4M14 10l7-7',
   sparkle: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z',
   plus: 'M12 5v14M5 12h14',
+  check: 'M5 12.5l4.5 4.5L19 7',
   more: 'M5.5 12h.5M11.75 12h.5M18 12h.5',
   sun: 'M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   edit: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
@@ -116,7 +117,18 @@ async function applyBackground() {
   else if (spec.type === 'video') host.innerHTML = `<video src="${esc(spec.value)}" autoplay muted loop playsinline></video>`;
   else if (spec.type === 'youtube') {
     const id = encodeURIComponent(spec.value);
-    host.innerHTML = `<iframe src="https://www.youtube.com/embed/${id}?autoplay=1&mute=1&controls=0&loop=1&playlist=${id}&modestbranding=1&playsinline=1&rel=0&iv_load_policy=3&disablekb=1" allow="autoplay; encrypted-media" tabindex="-1" title="Background video"></iframe>`;
+    const iframe = () => { host.innerHTML = `<iframe src="https://www.youtube.com/embed/${id}?autoplay=1&mute=1&controls=0&loop=1&playlist=${id}&modestbranding=1&playsinline=1&rel=0&iv_load_policy=3&disablekb=1" allow="autoplay; encrypted-media" tabindex="-1" title="Background video"></iframe>`; };
+    // ad-free first: a plain muted video, no ads or YouTube overlays; YouTube's player only if that fails
+    host.innerHTML = `<img src="https://i.ytimg.com/vi/${id}/maxresdefault.jpg" alt="" onerror="this.src='https://i.ytimg.com/vi/${id}/hqdefault.jpg'">`;
+    const src = S.settings.adFree !== false ? await YT.backgroundVideo(spec.value) : null;
+    if (bgKey !== key) return; // the background changed while we were looking it up
+    if (!src) { iframe(); return; }
+    const v = document.createElement('video');
+    Object.assign(v, { muted: true, autoplay: true, loop: true, playsInline: true, src: src.url });
+    v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
+    v.addEventListener('error', () => { if (bgKey === key) iframe(); }, { once: true });
+    v.addEventListener('playing', () => { host.querySelector('img')?.remove(); }, { once: true });
+    host.append(v);
   } else if (spec.type === 'file') {
     const blob = await getFile(spec.value).catch(() => null);
     if (!blob) { host.innerHTML = ''; return; }
@@ -178,7 +190,7 @@ function route() {
   if (name === 's' && subjectById(arg)) return { name: 'subject', id: arg };
   if (name === 'r' && S.resources.find((r) => r.id === arg)) return { name: 'resource', id: arg };
   if (name === 'library') return { name: 'library', tab: TYPE_LABEL[arg] ? arg : 'note' };
-  if (['today', 'subjects', 'calendar', 'courses', 'settings', 'studio'].includes(name)) return { name };
+  if (['today', 'subjects', 'calendar', 'courses', 'settings', 'studio', 'setup'].includes(name)) return { name };
   return { name: 'stage' };
 }
 function render() {
@@ -256,7 +268,7 @@ function homeHTML() {
   const soon = dueOpen.filter((d) => d.date <= addDays(1)).sort((a, b) => a.date.localeCompare(b.date));
   const tiles = S.subjects.slice(0, 6).map((s) => {
     const nl = nextLecture(s.id);
-    return `<a class="lec" href="#/s/${s.id}"><span class="code"><i style="background:${esc(s.color)}"></i>${esc(s.code || 'COURSE')}${nl?.live ? '<span class="live">● LIVE</span>' : ''}</span>
+    return `<a class="lec" href="#/s/${s.id}"><span class="code"><i style="background:${esc(s.color)}"></i>${esc(s.code || '')}${nl?.live ? '<span class="live">● LIVE</span>' : ''}</span>
       <b>${esc(s.name)}</b><small>${whenTxt(nl)}</small><div class="bar"><span style="width:${pct(s)}%"></span></div></a>`;
   }).join('');
   const tick = soon.length
@@ -265,8 +277,8 @@ function homeHTML() {
   return `<div class="home">
     <p class="greet">${greeting()}</p>
     <div class="clock num" data-clock></div>
-    <div class="lec-row">${tiles}</div>
-    <button class="ticker" data-act="pop" data-pop="due">${tick}</button>
+    ${S.subjects.length ? `<div class="lec-row">${tiles}</div>` : `<a class="setup-cta" href="#/setup">${ic('plus')}<span><b>Set up your library</b><small>Add your subjects, lecture times, deadlines and notes</small></span></a>`}
+    ${S.subjects.length || dueOpen.length ? `<button class="ticker" data-act="pop" data-pop="due">${tick}</button>` : ''}
   </div>`;
 }
 
@@ -530,6 +542,7 @@ function todayView() {
 function subjectsView() {
   return `<div class="page wide">
     <div class="ph-row"><div class="ph"><h1>Subjects</h1><p>Your lectures, with progress worked out from the topics you tick off.</p></div><button class="btn primary" data-act="subject-new">${ic('plus')} New subject</button></div>
+    ${S.subjects.length ? '' : `<div class="empty-big"><b>No subjects yet</b><p>Add the courses you’re taking. Each one gets its lecture times, topics to tick off, notes, textbooks and slides.</p><div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><a class="btn primary" href="#/setup">${ic('plus')} Set up step by step</a><button class="btn" data-act="subject-new">Add one subject</button></div></div>`}
     <div class="tiles">${S.subjects.map((s) => {
       const nl = nextLecture(s.id);
       const cover = s.cover ? `background-image:url('${esc(s.cover)}')` : `background:radial-gradient(90% 90% at 100% 100%, ${esc(s.color)} 0%, transparent 70%), linear-gradient(150deg, #15131f, ${esc(s.color)}55)`;
@@ -595,7 +608,7 @@ function chapterHTML(ch, s) {
 
 // ---------------------------------------------------------------- library (three databases)
 function resTableHTML(list, type) {
-  if (!list.length) return `<div class="empty">No ${TYPE_LABEL[type].toLowerCase()} yet.</div>`;
+  if (!list.length) return `<div class="empty">No ${TYPE_LABEL[type].toLowerCase()} yet. ${type === 'note' ? 'Notes are written in simple markdown and laid out on proper study paper.' : `Upload a PDF or paste a link, and FOKUS remembers the page you’re on.`}</div>`;
   const chName = (r) => chaptersOf(subjectById(r.subjectId)).find((c) => c.id === r.chapterId)?.name || '';
   return `<div class="table-wrap"><table class="db"><thead><tr><th>Name</th><th>Subject</th><th>Chapter</th>${type === 'note' ? '' : '<th>Progress</th>'}<th>Edited</th></tr></thead><tbody>
     ${[...list].sort((a, b) => b.updated - a.updated).map((r) => `<tr class="click" data-act="go" data-href="#/r/${r.id}">
@@ -766,6 +779,7 @@ function roomState() {
     weather: S.settings.roomWeather || 'rain',
     lampOn: S.settings.roomLamp ?? true,
     custom: roomCfg(),
+    appName: S.settings.appName || 'FOKUS',
     posters: posterSrcs(),
     gifts: S.gifts || [],
     giftsPending: S.giftsPending || [],
@@ -1286,8 +1300,8 @@ function renderMixer() {
   $('#mixer').innerHTML = `${radioHTML()}<h4 style="margin-top:8px">Ambient sounds</h4>${SND.CHANNELS.map(([id, label]) => `<label class="mix-row">${label}<input type="range" min="0" max="1" step="0.01" value="${v[id] || 0}" data-input="snd" data-id="${id}" aria-label="${label} volume"></label>`).join('')}
     <h4 style="margin-top:8px">Visualiser</h4>
     <div class="chips">${[['bars', 'Bars'], ['wave', 'Wave'], ['off', 'Off']].map(([k, l]) => `<button class="chip ${vs === k ? 'on' : ''}" data-act="viz-style" data-v="${k}" aria-pressed="${vs === k}">${l}</button>`).join('')}
-      <button class="chip ${cap ? 'on' : ''}" data-act="viz-tab" aria-pressed="${cap}">${cap ? 'Following YouTube · stop' : 'React to YouTube'}</button></div>
-    <p class="mix-note">${cap ? 'The bars, speaker and fairy lights follow the real music now.' : 'Radio and ambient sounds drive the bars directly. YouTube’s sound can’t be read by the page, so its bars are a gentle made-up groove unless you share this tab’s audio.'}</p>`;
+      <button class="chip ${cap ? 'on' : ''}" data-act="viz-tab" aria-pressed="${cap}">${cap ? 'Following the music · stop' : 'React to the music'}</button></div>
+    <p class="mix-note">${cap ? 'The bars, speaker and fairy lights follow the real music now.' : 'Radio and ambient sounds drive the bars directly. Ad-free YouTube’s server won’t let the page read its sound, so for YouTube the bars keep a gentle made-up groove. Tap “React to the music” and share this tab (tick “Share tab audio”) to make them follow the real song.'}</p>`;
 }
 
 // ---------------------------------------------------------------- aesthetic studio
@@ -1541,7 +1555,7 @@ function settingsView() {
       <p class="muted" style="margin:0;max-width:65ch">Everything is saved in this browser on this computer. Uploaded PDFs and backgrounds stay here too and aren’t part of the backup file.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-act="export">Export backup</button>
         <label class="btn" for="import-file">Import backup</label><input type="file" id="import-file" accept="application/json" data-change="import" hidden>
-        ${hasExamples() ? '<button class="btn" data-act="clear-examples">Clear example data</button>' : ''}<button class="btn danger" data-act="reset-all">Start over</button></div></div>
+        ${hasExamples() ? '<button class="btn" data-act="clear-examples">Clear example data</button>' : ''}${(() => { try { return localStorage.getItem(BACKUP_KEY) ? '<button class="btn" data-act="restore-cleanup">Undo example cleanup</button>' : ''; } catch { return ''; } })()}<button class="btn danger" data-act="reset-all">Start over</button></div></div>
   </div>`;
 }
 function applySettings() {
@@ -1557,6 +1571,43 @@ function setBg(spec) {
   if (!st.bgSame && ui.bgTab !== ui.mode) { ui.mode = ui.bgTab; saveUI(); }
   render();
 }
+
+// ---------------------------------------------------------------- first-run setup: add your own stuff
+const SETUP_COLORS = ['#6c47ff', '#e0725f', '#4fb3a9', '#f2c14e', '#ec4899', '#3b82f6', '#84cc16', '#a855f7'];
+function setupView() {
+  const subjects = S.subjects, st = S.settings;
+  const lecOf = (id) => S.lectures.filter((l) => l.subjectId === id);
+  const steps = [
+    { done: !!st.userName?.trim(), title: 'Your name', body: `<input class="input" data-change="set" data-k="userName" value="${esc(st.userName || '')}" placeholder="How the greeting and your friends see you" aria-label="Your name">` },
+    { done: subjects.length > 0, title: 'Your subjects', body: `
+      <div class="setup-chips">${subjects.map((x) => `<span class="setup-chip"><i style="background:${esc(x.color)}"></i>${esc(x.name)}${x.code ? ` <small>${esc(x.code)}</small>` : ''}<button data-act="setup-subj-del" data-id="${x.id}" aria-label="Remove ${esc(x.name)}">${ic('x', 12)}</button></span>`).join('')}</div>
+      <form class="row-input" data-form="setup-subject" style="padding:0"><input placeholder="${subjects.length ? 'Add another subject…' : 'e.g. Linear Algebra, MATH 221'}" aria-label="Subject name, then a comma and the course code if it has one"><button class="pill accent">Add</button></form>
+      <p class="setup-hint">Type a name and press Enter. Add a course code after a comma if you like.</p>` },
+    { done: S.lectures.length > 0, title: 'Lecture times', body: subjects.length ? `<div class="setup-list">${subjects.map((x) => `<div class="setup-row"><i style="background:${esc(x.color)}"></i><b>${esc(x.name)}</b><small>${lecOf(x.id).map((l) => `${l.days.map((d) => DOW[d]).join(' ')} ${fmtTime(l.start)}`).join(' · ') || 'No times yet'}</small><button class="btn sm" data-act="lecture-new" data-subject="${x.id}">${ic('plus')} Time</button></div>`).join('')}</div>` : '<p class="setup-hint">Add a subject first.</p>' },
+    { done: S.due.length > 0, title: 'What’s due', body: `${S.due.filter((d) => !d.done).slice(0, 4).map((d) => `<div class="setup-row"><b>${esc(d.title)}</b><small>${relDate(d.date)}</small></div>`).join('')}<button class="btn" data-act="due-new">${ic('plus')} Add a deadline</button>` },
+    { done: S.resources.length > 0, title: 'Notes, textbooks and slides', body: `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="res-new" data-type="note">${ic('note')} Write a note</button><button class="btn" data-act="res-new" data-type="textbook">${ic('book')} Add a textbook</button><button class="btn" data-act="res-new" data-type="slides">${ic('slides')} Add slides</button></div>
+      <p class="setup-hint">Textbooks and slides can be a PDF from your computer or a link. ${S.resources.length ? `You have ${S.resources.length} so far.` : ''}</p>` },
+  ];
+  const doneN = steps.filter((x) => x.done).length;
+  return `<div class="page">
+    <div class="ph"><h1>Set up ${esc(st.appName || 'FOKUS')}</h1><p>Add your own subjects and study material. Everything can be changed later, and nothing leaves this browser.</p></div>
+    <div class="setup-progress"><span style="width:${(doneN / steps.length) * 100}%"></span></div>
+    <ol class="setup">${steps.map((x, i) => `<li class="${x.done ? 'done' : ''}"><div class="setup-n">${x.done ? ic('check', 14) : i + 1}</div><div class="setup-body"><h3>${x.title}</h3>${x.body}</div></li>`).join('')}</ol>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-act="setup-done">${doneN >= 2 ? 'Done, take me home' : 'I’ll finish later'}</button><a class="btn ghost" href="#/settings">Backgrounds and look</a></div>
+  </div>`;
+}
+Object.assign(ACTS_EXTRA, {
+  'setup-subj-del': (el) => { const x = subjectById(el.dataset.id); if (!x) return; S.subjects = S.subjects.filter((y) => y !== x); S.lectures = S.lectures.filter((l) => l.subjectId !== x.id); save(); render(); toast(`Removed ${x.name}`); },
+  'setup-done': () => { S.settings.setupDone = true; save(); location.hash = '#/'; },
+});
+Object.assign(FORMS_EXTRA, {
+  'setup-subject': (v) => {
+    const [name, code = ''] = v.split(',').map((x) => x.trim());
+    if (!name) return;
+    S.subjects.push({ id: uid(), name, code, color: SETUP_COLORS[S.subjects.length % SETUP_COLORS.length], cover: '', units: [{ id: uid(), name: 'Unit 1', chapters: [{ id: uid(), name: 'Chapter 1', topics: [] }] }] });
+    save(); render(); setTimeout(() => $('[data-form="setup-subject"] input')?.focus(), 30);
+  },
+});
 
 // ---------------------------------------------------------------- modal forms
 let modalDelete = null;
@@ -1881,7 +1932,8 @@ const ACTS = {
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   },
   'clear-examples': () => confirmBox('Remove all the example subjects, notes and deadlines?', 'Clear examples', () => { clearExamples(); toast('Examples cleared'); }),
-  'reset-all': () => confirmBox('Erase everything and reload the examples?', 'Erase and reset', () => { resetToExamples(); applySettings(); }),
+  'reset-all': () => confirmBox('Erase everything and start with an empty app?', 'Erase everything', () => { startOver(); applySettings(); render(); }),
+  'restore-cleanup': () => confirmBox('Put back everything as it was before the example data was removed? Changes since then will be lost.', 'Put it back', () => { if (restoreBeforeCleanup()) { applySettings(); render(); toast('Restored'); } }),
 
   'st-add': (el) => addSticker(el.dataset.kind, el.dataset.value),
   'st-forget': (el) => { S.stickerPack = S.stickerPack.filter((p) => p.id !== el.dataset.id); save(); tray.innerHTML = trayHTML(); },
@@ -1930,7 +1982,7 @@ const CHANGES = {
       const data = JSON.parse(await el.files[0].text());
       if (!data.subjects || !data.settings) throw new Error('not a backup');
       replaceAll(data); applySettings(); render(); toast('Backup restored');
-    } catch { toast('That file isn’t a Study Haven backup'); }
+    } catch { toast('That file isn’t a FOKUS backup'); }
   },
   'bg-upload': async (el) => {
     const f = el.files[0];
@@ -2032,7 +2084,7 @@ view.addEventListener('scroll', () => { const l = $('#sticker-layer', view); if 
 // ---------------------------------------------------------------- boot
 Object.assign(ACTS, ACTS_EXTRA, ROOM_ACTS);
 Object.assign(CHANGES, CHANGES_EXTRA);
-const VIEWS = { studio: studioView, today: todayView, subjects: subjectsView, subject: subjectView, library: libraryView, resource: resourceView, calendar: calendarView, courses: coursesView, settings: settingsView };
+const VIEWS = { setup: setupView, studio: studioView, today: todayView, subjects: subjectsView, subject: subjectView, library: libraryView, resource: resourceView, calendar: calendarView, courses: coursesView, settings: settingsView };
 // ---------------------------------------------------------------- updates
 // GitHub Pages lets browsers keep files for 10 minutes, so friends could end up on different
 // versions. When version.json online is newer than this copy, re-download every file into the
@@ -2057,6 +2109,10 @@ if ('serviceWorker' in navigator && location.hostname !== 'localhost') navigator
 checkForUpdate();
 setInterval(checkForUpdate, 5 * 60_000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
+// the example subjects and deadlines are gone for good: clear them out of data that started with them
+{ const n = removePlaceholders(); if (n) setTimeout(() => toast(`Removed ${n} example items. Settings → Your data can undo this.`), 1200); }
+// first visit (or nothing added yet): start with setup
+if (!S.settings.setupDone && !S.subjects.length && !location.hash.replace(/^#\/?/, '')) location.hash = '#/setup';
 applySettings();
 SND.setMuted(S.settings.catSounds === false);
 VIZ.mountStage($('#viz'), () => ({ style: S.settings.visualiser || 'bars', hidden: ui.mode === 'room', musicPlaying: YT.P.playing, accent: S.settings.accent || '#6c47ff' }));

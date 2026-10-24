@@ -1,4 +1,4 @@
-# Study Haven
+# FOKUS
 
 A calm, full-screen study app in the style of Flocus. It has three modes:
 - **Home**: greeting, clock, lecture tiles and what's due.

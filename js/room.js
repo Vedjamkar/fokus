@@ -180,7 +180,7 @@ export async function mountRoom(host, opts) {
   const screen = canvasTex(512, 320, (g, w, h) => {
     const grd = g.createLinearGradient(0, 0, w, h); grd.addColorStop(0, '#1b1640'); grd.addColorStop(1, S.accent || '#6c47ff');
     g.fillStyle = grd; g.fillRect(0, 0, w, h);
-    g.fillStyle = 'rgba(255,255,255,.85)'; g.font = font(700, 30); g.fillText('study haven', 28, 54);
+    g.fillStyle = 'rgba(255,255,255,.85)'; g.font = font(700, 30); g.fillText((S.appName || 'FOKUS').toLowerCase(), 28, 54);
     g.font = font(600, 22); g.fillStyle = 'rgba(255,255,255,.6)'; g.fillText('NOW', 28, 120);
     g.fillStyle = '#fff'; g.font = font(700, 34);
     const t = S.task || 'Pick something to focus on';
@@ -367,7 +367,8 @@ export async function mountRoom(host, opts) {
     const img = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.16, h - 0.16), new THREE.MeshBasicMaterial({ map: t.tex, toneMapped: false }));
     at(img, 0, 0, 0.05); g.add(img);
     gallery.add(pick(g, 'frame', { slot }));
-    return { t, src: null };
+    g.visible = false; // a frame only shows once it has a picture (add them in Customise → Wall posters)
+    return { t, src: null, g };
   });
   scene.add(gallery);
   function drawEmptyFrame(f) {
@@ -383,6 +384,7 @@ export async function mountRoom(host, opts) {
     const list = S.posters || [];
     frames.forEach((f, i) => {
       const src = list[i] || null;
+      f.g.visible = !!src;
       if (src === f.src) return;
       f.src = src;
       if (!src) return drawEmptyFrame(f);
@@ -1268,6 +1270,7 @@ export async function mountRoom(host, opts) {
       if ('posters' in next) updateFrames();
       if ('gifts' in next) updateSill();
       if ('giftsPending' in next) syncGifts();
+      if ('appName' in next && next.appName !== prev.appName) screen.redraw();
       if ('accent' in next || 'wall' in next) { applyTheme(); screen.redraw(); calTex.redraw(); clockTex.redraw(); }
       if (next.custom && JSON.stringify(next.custom) !== JSON.stringify(C)) { const relayout = JSON.stringify(next.custom.layout) !== JSON.stringify(C.layout); C = next.custom; applyCustom(); if (relayout) applyLayout(); }
       if (next.weather && next.weather !== weather) setWeather(next.weather);

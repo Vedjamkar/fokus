@@ -103,9 +103,10 @@ async function playAd(i) {
   if (token !== playToken) return true; // something else started meanwhile
   const abs = (u) => (u.startsWith('http') ? u : base + u);
   P.title = j.title || P.title; P.author = j.author || P.author;
-  if (j.liveNow) {
-    // live streams come as HLS (picture and sound together), which only Safari plays natively
-    if (!j.hlsUrl || !videoEl?.canPlayType('application/vnd.apple.mpegurl')) throw new Error('live');
+  // Live streams: Safari plays the HLS stream (picture and sound together). Elsewhere the live tracks
+  // can't be jumped around in and often don't load at all, so live streams use YouTube's own player.
+  if (j.liveNow && !(j.hlsUrl && videoEl?.canPlayType('application/vnd.apple.mpegurl') && /Safari/.test(navigator.userAgent) && !/Chrome|Chromium|Edg/.test(navigator.userAgent))) throw new Error('live');
+  if (j.liveNow && j.hlsUrl && videoEl?.canPlayType('application/vnd.apple.mpegurl') && /Safari/.test(navigator.userAgent) && !/Chrome|Chromium|Edg/.test(navigator.userAgent)) {
     liveVideo = true; tubeEl.pause(); tubeEl.removeAttribute('src');
     videoEl.muted = false; videoEl.volume = P.volume / 100; videoEl.src = abs(j.hlsUrl);
     showAdFree(true, thumb(item.id));
@@ -312,3 +313,18 @@ export const playAt = (i) => (P.mode === 'adfree' ? playAd(i).catch(() => {}) : 
 export const state = () => (P.mode === 'adfree' || P.mode === 'radio' ? (P.playing ? 1 : 2) : player?.getPlayerState?.() ?? -2);
 // YouTube's own player state, whatever mode is active (1 = playing); handy for checking it's quiet
 export const youtubeState = () => player?.getPlayerState?.() ?? -2;
+
+// A YouTube video as a background picture: the sharpest H.264 video-only track up to 1080p, played muted
+// and looped in a plain <video>, so there are no ads or YouTube overlays. Null for live streams or when no server answers.
+export async function backgroundVideo(id) {
+  try {
+    const { base, j } = await invidious(`/api/v1/videos/${encodeURIComponent(id)}?local=true&fields=liveNow,adaptiveFormats`);
+    if (j.liveNow) return null; // live tracks aren't dependable as plain video: YouTube's player handles those
+    const h = (f) => parseInt(f.qualityLabel || '0', 10) || 0;
+    const probe = document.createElement('video');
+    const vids = (j.adaptiveFormats || []).filter((f) => /^video\//.test(f.type) && h(f) <= 1080 && probe.canPlayType(f.type));
+    const pick = vids.filter((f) => /avc1/.test(f.type)).sort((a, b) => h(b) - h(a))[0] || vids.sort((a, b) => h(b) - h(a))[0];
+    if (!pick) return null;
+    return { url: pick.url.startsWith('http') ? pick.url : base + pick.url, live: !!j.liveNow };
+  } catch { return null; }
+}
