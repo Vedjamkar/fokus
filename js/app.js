@@ -851,6 +851,8 @@ const ROOM_ACTS = {
   'room-labels': (el) => { S.settings.roomLabels = !(S.settings.roomLabels ?? true); save(); room?.setLabels(S.settings.roomLabels); el.classList.toggle('on', S.settings.roomLabels); },
   'tg-create': () => { const me = meMember(); TGM.create(me); },
   'tg-leave': () => { TGM.leave(); },
+  'tg-join-pending': () => { const c = ui.pendingJoin; if (!S.settings.userName?.trim()) { $('[data-input="tg-name"]', popTogether)?.focus(); return toast('Add your name so friends know who joined'); } TGM.join(c, meMember()); },
+  'tg-forget-invite': () => { ui.pendingJoin = ''; popTogether.innerHTML = togetherHTML(); },
   'tg-copy': async (el) => { try { await navigator.clipboard.writeText(el.dataset.text); toast('Copied'); } catch { toast(el.dataset.text); } },
   'tg-sync': () => { ui.syncTimer = !ui.syncTimer; popTogether.innerHTML = togetherHTML(); if (ui.syncTimer) timerChanged(true); },
   'tg-group': () => { ui.syncTimer = true; tSetMode('focus'); tStart(); toast('Group focus started for everyone in the room'); },
@@ -1052,6 +1054,7 @@ TGM.onTimer((t, by) => {
 function friendClock(m) { return m.status !== 'idle' && m.endAt ? mmss(Math.max(0, Math.ceil((m.endAt - Date.now()) / 1000))) : ''; }
 function pushFriends() { room?.setFriends([...TGM.TG.members.values()].filter((m) => m.id !== myId).map((m) => ({ ...m, clock: friendClock(m) }))); }
 TGM.onChange(() => {
+  if (TGM.TG.status === 'on') ui.pendingJoin = '';
   if (ui.pop === 'together') {
     const chatIn = $('#tg-say'), had = document.activeElement === chatIn, val = chatIn?.value;
     popTogether.innerHTML = togetherHTML();
@@ -1065,10 +1068,24 @@ TGM.onChange(() => {
 setInterval(() => { if (TGM.TG.status === 'on') { pushFriends(); if (ui.pop === 'together') $$('[data-fclock]', popTogether).forEach((e) => { const m = TGM.TG.members.get(e.dataset.fclock); if (m) e.textContent = statusText(m); }); } }, 1000);
 setInterval(() => { if (TGM.TG.status === 'on') pushPresence(); }, 20_000);
 const statusText = (m) => (m.status === 'focus' ? `focusing ${friendClock(m)}` : m.status === 'break' ? `break ${friendClock(m)}` : 'here');
-function joinRoom(codeStr) { TGM.join(codeStr, meMember()); }
+function joinRoom(codeStr) { ui.pendingJoin = ''; TGM.join(codeStr, meMember()); }
 function togetherHTML() {
   const TG = TGM.TG;
   const head = `<div class="pop-head"><span class="chip-ic">${ic('users')}</span><b>Study together</b><span class="spacer"></span><button class="sq sm" data-act="pop" data-pop="together" aria-label="Close">${ic('x')}</button></div>`;
+  if (TG.status === 'reconnecting') {
+    return `${head}<div class="pop-body" style="gap:12px;padding:16px 18px">
+      <p style="margin:0;font-size:14px"><b>Reconnecting to room ${esc(TG.room)}…</b></p>
+      <p class="muted" style="margin:0;font-size:13px">The host may be refreshing their page. You’ll be back in automatically.</p>
+      <button class="btn ghost" data-act="tg-leave" style="align-self:flex-start">Stop trying</button></div>`;
+  }
+  if (TG.status !== 'on' && ui.pendingJoin) {
+    return `${head}<div class="pop-body" style="gap:12px;padding:16px 18px">
+      <p style="margin:0;font-size:15px">You’re invited to room <span class="code-chip">${esc(ui.pendingJoin)}</span></p>
+      <label class="field">Your name<input data-input="tg-name" value="${esc(S.settings.userName)}" placeholder="How friends will see you" autofocus></label>
+      <button class="pill accent" data-act="tg-join-pending" ${TG.status === 'connecting' ? 'disabled' : ''}>${TG.status === 'connecting' ? 'Joining…' : 'Join the room'}</button>
+      ${TG.error ? `<p style="margin:0;color:var(--bad);font-size:13.5px">${esc(TG.error)}</p>` : ''}
+      <button class="btn ghost" data-act="tg-forget-invite" style="align-self:flex-start">Not now</button></div>`;
+  }
   if (TG.status !== 'on') {
     return `${head}<div class="pop-body" style="gap:12px;padding:16px 18px">
       <p class="muted" style="margin:0;font-size:14px">Open a live room and study with friends: you’ll see each other’s timers and tasks, share a group focus, and chat on breaks. Friends show up sitting in your study room.</p>
@@ -1777,7 +1794,7 @@ async function uploadFile(r, file) {
   } catch { toast('Couldn’t store the file. The browser may be out of space.'); }
 }
 let noteSave, taskSync;
-let brightSave = 0;
+let brightSave = 0, nameSync = 0;
 const INPUTS = {
   'note-src': (el) => {
     const r = S.resources.find((x) => x.id === el.dataset.id);
@@ -1788,7 +1805,7 @@ const INPUTS = {
   'yt-vol': (el) => { YT.setVolume(el.value); S.music.volume = +el.value; save(); },
   't-task': (el) => { T.task = el.value; saveT(); clearTimeout(taskSync); taskSync = setTimeout(() => { room?.update({ task: T.task }); pushPresence(); }, 400); },
   snd: (el) => { S.settings.sounds = { ...(S.settings.sounds || {}), [el.dataset.id]: +el.value }; SND.setVolume(el.dataset.id, +el.value); save(); },
-  'tg-name': (el) => { S.settings.userName = el.value; save(); },
+  'tg-name': (el) => { S.settings.userName = el.value; save(); clearTimeout(nameSync); nameSync = setTimeout(() => { pushPresence(); room?.update({}); }, 500); },
   'room-bright': (el) => { S.settings.roomBright = +el.value; room?.update({ bright: +el.value }); clearTimeout(brightSave); brightSave = setTimeout(save, 300); },
   'rc-name': (el) => { S.settings.room = { ...roomCfg(), petName: el.value }; save(); },
   dim: (el) => { S.settings.dim = +el.value; save(); applyBackground(); },
@@ -1854,6 +1871,15 @@ applySettings();
 SND.setMuted(S.settings.catSounds === false);
 VIZ.mountStage($('#viz'), () => ({ style: S.settings.visualiser || 'bars', hidden: ui.mode === 'room', musicPlaying: YT.P.playing, accent: S.settings.accent || '#6c47ff' }));
 render();
-{ const code = new URLSearchParams(location.search).get('room'); if (code) { ui.pendingJoin = code.toUpperCase(); openPop('together'); } }
+{
+  // an invite link: join straight away if we know your name, otherwise ask for it first
+  const code = new URLSearchParams(location.search).get('room');
+  if (code) {
+    history.replaceState(null, '', location.pathname + location.hash);
+    ui.pendingJoin = code.toUpperCase().slice(0, 5);
+    if (S.settings.userName?.trim()) TGM.join(ui.pendingJoin, meMember());
+    openPop('together');
+  } else TGM.resume(meMember());
+}
 // greeting and lecture "live" badges depend on the time of day
 setInterval(() => { if (ui.mode === 'home' && sheet.hidden && !document.activeElement?.matches('input,textarea,select')) center.innerHTML = homeHTML(), tickClock(); }, 60_000);
