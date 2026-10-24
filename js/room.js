@@ -596,19 +596,52 @@ export async function mountRoom(host, opts) {
     list.slice(0, SEAT_OFFSETS.length).forEach((f, i) => {
       const x = RUG[0] + SEAT_OFFSETS[i][0], z = RUG[1] + SEAT_OFFSETS[i][1];
       const g = new THREE.Group(); at(g, x, 0, z);
-      g.add(at(cyl(0.6, 0.65, 0.3, mat(0xf2ede6, { roughness: 1 }), 20), 0, 0.15, 0));
+      // a little seated character; local +z faces the middle of the rug
+      const hash = [...(f.name || '?')].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7);
       const c = new THREE.Color(f.color || '#4fb3a9');
-      g.add(at(new THREE.Mesh(new THREE.CapsuleGeometry(0.33, 0.45, 6, 12), mat(c)), 0, 0.85, 0));
-      g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 12), mat(0xf1c9a5)), 0, 1.55, 0));
-      g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x2b1d14)), 0, 1.6, 0));
-      // a little laptop in front of them
-      const lap = new THREE.Group(); at(lap, 0, 0.32, 0.55);
-      lap.add(box(0.6, 0.04, 0.4, shell, 0.01));
-      const ls = at(box(0.6, 0.4, 0.03, mat(0x1b1640, { emissive: c, emissiveIntensity: f.status === 'focus' ? 0.8 : 0.2 }), 0.01), 0, 0.2, -0.2); ls.rotation.x = -0.2; lap.add(ls);
+      const skin = mat([0xf3d2b3, 0xe8b98f, 0xc68b62, 0x9a6440, 0x6e4529][hash % 5], { roughness: 0.7 });
+      const hairM = mat([0x2b1d14, 0x4a2c1a, 0x111111, 0x8a5a2b, 0xd9b26a, 0x6b2a2a][(hash >> 3) % 6], { roughness: 0.85 });
+      const shirt = mat(c, { roughness: 0.8 });
+      const pants = mat(new THREE.Color(c).lerp(new THREE.Color('#1d1a2b'), 0.65), { roughness: 0.85 });
+      // cushion with a tuft in the middle
+      const cushion = at(new THREE.Mesh(new RoundedBoxGeometry(1.15, 0.26, 1.15, 4, 0.12), mat(0xf2ede6, { roughness: 1 })), 0, 0.13, 0); cushion.castShadow = cushion.receiveShadow = true; g.add(cushion);
+      // crossed legs
+      [-1, 1].forEach((sd) => {
+        const leg = at(new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.42, 6, 10), pants), sd * 0.12, 0.38, 0.12);
+        leg.rotation.z = Math.PI / 2; leg.rotation.y = sd * 0.5; leg.castShadow = true; g.add(leg);
+        g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), mat(0xeeeeee)), -sd * 0.2, 0.36, 0.3)); // socks peeking out
+      });
+      // torso, leaning in a little
+      const torso = at(new THREE.Mesh(new THREE.CapsuleGeometry(0.27, 0.34, 6, 14), shirt), 0, 0.82, -0.04); torso.rotation.x = 0.1; torso.scale.set(1, 1, 0.85); torso.castShadow = true; g.add(torso);
+      // arms reaching to the keyboard, with hands
+      [-1, 1].forEach((sd) => {
+        const arm = at(new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.34, 4, 8), shirt), sd * 0.3, 0.86, 0.12);
+        arm.rotation.x = 1.0; arm.rotation.z = sd * 0.25; arm.castShadow = true; g.add(arm);
+        g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), skin), sd * 0.2, 0.66, 0.36));
+      });
+      // head: face, eyes, blush, hair
+      const headG = new THREE.Group(); at(headG, 0, 1.42, 0.02); g.add(headG);
+      const headM = new THREE.Mesh(new THREE.SphereGeometry(0.29, 20, 16), skin); headM.castShadow = true; headG.add(headM);
+      const eyeM = new THREE.MeshBasicMaterial({ color: 0x1d1a2b });
+      [-1, 1].forEach((sd) => {
+        const eye = at(new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), eyeM), sd * 0.1, -0.02, 0.265); eye.scale.y = 1.35; headG.add(eye);
+        const blush = at(new THREE.Mesh(new THREE.CircleGeometry(0.045, 14), new THREE.MeshBasicMaterial({ color: 0xff8fa3, transparent: true, opacity: 0.45 })), sd * 0.17, -0.09, 0.255);
+        blush.rotation.y = sd * 0.55; headG.add(blush);
+      });
+      const cap = at(new THREE.Mesh(new THREE.SphereGeometry(0.31, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.55), hairM), 0, 0.03, -0.035); cap.rotation.x = -0.35; headG.add(cap);
+      const fringe = at(new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), hairM), (hash % 2 ? 1 : -1) * 0.05, 0.17, 0.17); fringe.scale.set(1.25, 0.45, 0.6); fringe.rotation.z = (hash % 2 ? -1 : 1) * 0.25; headG.add(fringe);
+      if ((hash >> 5) % 3 === 0) headG.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 10), hairM), 0, 0.12, -0.3)); // a bun for some
+      // laptop on their lap: hinge at the far side, screen facing them
+      const lap = new THREE.Group(); at(lap, 0, 0.56, 0.42); lap.rotation.x = -0.12;
+      lap.add(box(0.5, 0.03, 0.34, shell, 0.01));
+      const lid = new THREE.Group(); at(lid, 0, 0.015, 0.17); lid.rotation.x = 0.35; lap.add(lid);
+      lid.add(at(box(0.5, 0.34, 0.025, shell, 0.01), 0, 0.17, 0));
+      const glowOn = f.status === 'focus' ? 0.9 : 0.25;
+      lid.add(at(new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.28), new THREE.MeshStandardMaterial({ color: 0x1b1640, emissive: c, emissiveIntensity: glowOn })).rotateY(Math.PI), 0, 0.17, -0.014));
       g.add(lap);
       g.rotation.y = Math.atan2(RUG[0] - x, RUG[1] - z); // face the middle of the rug
       const label = labelSprite(`${f.name}${f.status === 'focus' ? ` · ${f.clock || 'focusing'}` : f.status === 'break' ? ' · on break' : ''}`, f.status === 'focus' ? '#4ade80' : f.status === 'break' ? '#fbbf24' : '#9ca3af');
-      at(label, x, 2.4, z); friendGroup.add(label);
+      at(label, x, 2.15, z); friendGroup.add(label);
       friendGroup.add(pick(g, 'friend', { name: f.name, task: f.task, status: f.status }));
     });
   }
