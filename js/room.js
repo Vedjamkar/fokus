@@ -742,6 +742,96 @@ export async function mountRoom(host, opts) {
     }
   }
 
+  // ---------- gifts from friends: a wrapped box drops in, you open it, and it goes on the window sill
+  function giftItem(kind) {
+    const g = new THREE.Group();
+    const M = (c, o) => mat(c, { roughness: 0.55, ...o });
+    if (kind === 'succulent') { g.add(at(cyl(0.11, 0.09, 0.14, M(0xd98b5f), 14), 0, 0.07, 0)); [[0, 0.2, 0], [0.06, 0.17, 0.03], [-0.06, 0.17, -0.02], [0.02, 0.16, -0.07]].forEach(([x, y, z]) => { const l = at(new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), M(0x5fae6b)), x, y, z); l.scale.set(0.7, 1.3, 0.7); g.add(l); }); }
+    if (kind === 'cookie') { const c = at(cyl(0.14, 0.14, 0.04, M(0xc98b4f), 20), 0, 0.02, 0); g.add(c); [[0.05, 0.03], [-0.06, -0.02], [0.01, -0.07], [-0.03, 0.07]].forEach(([x, z]) => g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 5), M(0x3b2416)), x, 0.045, z))); }
+    if (kind === 'cupcake') { g.add(at(cyl(0.1, 0.075, 0.12, M(0xff9fb8), 14), 0, 0.06, 0)); g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 10), M(0xfff1f5)), 0, 0.15, 0)); g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), M(0xe0303f)), 0, 0.26, 0)); }
+    if (kind === 'flowers') { g.add(at(cyl(0.06, 0.08, 0.18, M(0x9fd3e8, { transparent: true, opacity: 0.85 }), 12), 0, 0.09, 0)); [[0xff7aa2, -0.05, 0.3], [0xffc46b, 0.05, 0.32], [0xb39bff, 0, 0.36]].forEach(([c, x, y]) => { g.add(at(cyl(0.006, 0.006, y - 0.12, M(0x3f8f5f), 4), x * 0.6, 0.12 + (y - 0.12) / 2, 0)); g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), M(c)), x, y, 0)); }); }
+    if (kind === 'star') { const st = new THREE.Mesh(new THREE.OctahedronGeometry(0.13, 0), M(0xffd76b, { emissive: 0xffc43b, emissiveIntensity: 0.8 })); st.scale.set(1, 1.2, 0.5); at(st, 0, 0.16, 0); g.add(st); g.userData.spin = st; }
+    if (kind === 'duck') { g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 10), M(0xffd23f)), 0, 0.09, 0)); g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 10), M(0xffd23f)), 0.07, 0.2, 0)); const bk = at(new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.07, 8), M(0xff8a3b)), 0.15, 0.19, 0); bk.rotation.z = -Math.PI / 2; g.add(bk); g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.012, 6, 5), new THREE.MeshBasicMaterial({ color: 0x111111 })), 0.11, 0.23, 0.04)); }
+    if (kind === 'cocoa') { g.add(at(cyl(0.08, 0.07, 0.15, M(0xe0725f), 14), 0, 0.075, 0)); g.add(at(cyl(0.07, 0.07, 0.01, M(0x5a3420), 14), 0, 0.15, 0)); [[0.03, 0], [-0.025, 0.02]].forEach(([x, z]) => g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), M(0xffffff)), x, 0.16, z))); }
+    if (kind === 'crystal') { const cr = new THREE.Mesh(new THREE.OctahedronGeometry(0.1, 0), M(0xb39bff, { emissive: 0x7a5cff, emissiveIntensity: 0.6, metalness: 0.2, roughness: 0.2 })); cr.scale.set(0.8, 1.6, 0.8); at(cr, 0, 0.17, 0); g.add(cr); g.add(at(cyl(0.08, 0.1, 0.04, M(0x8a8a92), 8), 0, 0.02, 0)); g.userData.spin = cr; }
+    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    return g;
+  }
+  const GIFT_NAMES = { succulent: 'Succulent', cookie: 'Cookie', cupcake: 'Cupcake', flowers: 'Flowers', star: 'Lucky star', duck: 'Rubber duck', cocoa: 'Hot cocoa', crystal: 'Crystal' };
+  const sill = new THREE.Group(); scene.add(sill);
+  const SILL_Y = 3.27, SILL_Z = -4.62, SLOTS = 10;
+  // fill from the right end of the sill: the left side is behind the lamp and laptop from the usual view
+  const sillSlot = (i) => new THREE.Vector3(1.95 - (i % SLOTS) * 0.36, SILL_Y, SILL_Z);
+  function updateSill() {
+    sill.clear();
+    pickables.splice(0, pickables.length, ...pickables.filter((p) => p.userData.pick.id !== 'souvenir'));
+    (S.gifts || []).slice(-SLOTS).forEach((gf, i) => {
+      const it = giftItem(gf.item); it.scale.setScalar(1.3); it.position.copy(sillSlot(i)); it.rotation.y = ((i * 53) % 7 - 3) * 0.15;
+      const d = new Date(gf.at || Date.now());
+      sill.add(pick(it, 'souvenir', { tip: `${GIFT_NAMES[gf.item] || 'Gift'} from ${gf.from} · ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` }));
+    });
+  }
+  updateSill();
+  const boxes = new Map(); // id → { g, lid, vy, landed, opening, t, item, fly }
+  function giftBox(gf) {
+    const g = new THREE.Group();
+    const wrap = mat(new THREE.Color(gf.color || '#e0725f'), { roughness: 0.5 });
+    const ribbon = mat(0xfff4d6, { roughness: 0.35, metalness: 0.1 });
+    g.add(at(box(0.46, 0.36, 0.46, wrap, 0.04), 0, 0.18, 0));
+    g.add(at(box(0.08, 0.37, 0.47, ribbon, 0.01), 0, 0.18, 0), at(box(0.47, 0.37, 0.08, ribbon, 0.01), 0, 0.18, 0));
+    const lid = new THREE.Group(); at(lid, 0, 0.38, 0); g.add(lid);
+    lid.add(box(0.52, 0.09, 0.52, wrap, 0.03));
+    lid.add(at(box(0.09, 0.1, 0.53, ribbon, 0.01), 0, 0, 0), at(box(0.53, 0.1, 0.09, ribbon, 0.01), 0, 0, 0));
+    [-1, 1].forEach((sd) => { const bow = at(new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.025, 8, 16), ribbon), sd * 0.07, 0.1, 0); bow.rotation.y = Math.PI / 2; bow.rotation.x = sd * 0.5; lid.add(bow); });
+    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    return { g, lid };
+  }
+  function syncGifts() {
+    const pending = S.giftsPending || [];
+    const ids = new Set(pending.map((p) => p.id));
+    for (const [id, b] of boxes) if (!ids.has(id) && !b.opening) { scene.remove(b.g); boxes.delete(id); }
+    pending.forEach((gf, i) => {
+      if (boxes.has(gf.id)) return;
+      const { g, lid } = giftBox(gf);
+      // land somewhere on the rug, away from the cat and the chairs
+      const a = (hashOf(gf.id) % 360) * Math.PI / 180, r = 0.7 + (hashOf(gf.id) % 5) * 0.12;
+      const x = rugG.position.x + 0.6 + Math.cos(a) * r, z = rugG.position.z + 0.5 + Math.sin(a) * r * 0.6;
+      const fresh = Date.now() - (gf.at || 0) < 15_000;
+      g.position.set(x, fresh ? 6.5 + i * 0.6 : 0.04, z); g.rotation.y = a;
+      scene.add(pick(g, 'gift', { id: gf.id, tip: `A gift from ${gf.from} · click to open` }));
+      boxes.set(gf.id, { g, lid, vy: 0, landed: !fresh, opening: false, t: 0, item: gf.item });
+    });
+  }
+  function openGift(id) {
+    const b = boxes.get(id);
+    if (!b || b.opening || !b.landed) return;
+    b.opening = true; b.t = 0;
+    const pi = pickables.indexOf(b.g); if (pi >= 0) pickables.splice(pi, 1);
+    b.it = giftItem(b.item); b.it.position.copy(b.g.position).add(new THREE.Vector3(0, 0.25, 0)); b.it.scale.setScalar(0.01); scene.add(b.it);
+    b.from = b.it.position.clone();
+    b.to = sillSlot(Math.min((S.gifts || []).length, SLOTS - 1));
+    SND.chime(2, 0.18); setTimeout(() => SND.chime(4, 0.16), 160); setTimeout(() => SND.chime(5, 0.14), 320);
+    for (let i = 0; i < 18; i++) puff(confettiTex[i % 5], b.g.position.x + (Math.random() - 0.5) * 0.8, 0.8 + Math.random() * 0.6, b.g.position.z + (Math.random() - 0.5) * 0.8, 0.12);
+  }
+  function stepGifts(dt, t) {
+    for (const [id, b] of boxes) {
+      if (!b.landed) {
+        b.vy -= 18 * dt; b.g.position.y += b.vy * dt; b.g.rotation.y += dt * 2;
+        if (b.g.position.y <= 0.04) { b.g.position.y = 0.04; if (b.vy < -3) { SND.thump(0.35); b.vy = -b.vy * 0.35; } else { b.vy = 0; b.landed = true; } }
+        continue;
+      }
+      if (!b.opening) { b.lid.position.y = 0.38 + Math.max(0, Math.sin(t * 3 + hashOf(id))) * 0.025; continue; } // a little jiggle: open me
+      b.t += dt;
+      const k = b.t;
+      b.lid.position.y = 0.38 + k * 3; b.lid.rotation.z = k * 4; b.lid.visible = k < 0.5;
+      if (k < 1.2) { const e = Math.min(1, k / 0.6); b.it.scale.setScalar(0.01 + e * 1.6); b.it.position.y = b.from.y + e * 1.4; b.it.rotation.y += dt * 5; b.g.scale.setScalar(Math.max(0.01, 1 - k * 0.9)); }
+      else if (k < 2.3) { const e = (k - 1.2) / 1.1, s2 = e * e * (3 - 2 * e); b.it.position.lerpVectors(new THREE.Vector3(b.from.x, b.from.y + 1.4, b.from.z), b.to, s2); b.it.position.y += Math.sin(s2 * Math.PI) * 1.2; b.it.scale.setScalar(1.6 - s2 * 0.3); b.it.rotation.y += dt * 3; b.g.visible = false; }
+      else { scene.remove(b.g, b.it); boxes.delete(id); opts.onPick('gift-open', { id }); }
+    }
+    sill.children.forEach((it) => { if (it.userData.spin) it.userData.spin.rotation.y += dt * 0.8; });
+  }
+  syncGifts();
+
   // ---------- floating labels: what each thing opens
   const tags = new THREE.Group(); scene.add(tags);
   function tagSprite(text) {
@@ -872,7 +962,7 @@ export async function mountRoom(host, opts) {
     if (gg) {
       const p = gg.userData.pick;
       if (p.id === 'chime' && clockT.getElapsedTime() - chimeHoverAt > 0.45) { chimeHoverAt = clockT.getElapsedTime(); chimeSway = Math.min(0.5, chimeSway + 0.18); SND.chime(Math.floor(Math.random() * 6), 0.09); }
-      tip.textContent = p.id === 'cat' ? `${C.petName || 'Mochi'} the cat` : p.id === 'book' ? p.data.name : p.id === 'friend' ? `${p.data.name}${p.data.task ? ` — ${p.data.task}` : ''}` : LABELS[p.id];
+      tip.textContent = p.data?.tip || (p.id === 'cat' ? `${C.petName || 'Mochi'} the cat` : p.id === 'book' ? p.data.name : p.id === 'friend' ? `${p.data.name}${p.data.task ? ` — ${p.data.task}` : ''}` : LABELS[p.id]);
       tip.hidden = false;
       const r = host.getBoundingClientRect();
       tip.style.left = `${e.clientX - r.left + 14}px`; tip.style.top = `${e.clientY - r.top + 14}px`;
@@ -955,6 +1045,8 @@ export async function mountRoom(host, opts) {
     if (p.id === 'lights') { const order = ['warm', 'pink', 'blue', 'rainbow']; C = { ...C, lights: order[(order.indexOf(C.lights || 'warm') + 1) % order.length] }; applyCustom(); opts.onPick('lights', { lights: C.lights }); return; }
     if (p.id === 'cat') { const was = catMode; wakeCat(); if (was !== 'sleep') { SND.meow(); hopT = 0.01; } catHappy = 2.5; opts.onPick('cat', { woke: was === 'sleep' }); return; }
     if (p.id === 'yarn') { throwYarn(); return; }
+    if (p.id === 'gift') { openGift(p.data.id); return; }
+    if (p.id === 'souvenir') { SND.chime(Math.floor(Math.random() * 6), 0.12); return; }
     if (p.id === 'globe') { globeSpin += 9 + Math.random() * 5; SND.whoosh(0.22, 0.9); return; }
     if (p.id === 'cradle') { if (cradleA < 0.1) cradlePh = -Math.PI / 2; cradleA = 0.75; return; }
     if (p.id === 'chime') { chimeSway = 0.7; [0, 2, 4, 1, 3, 5].forEach((n, i) => setTimeout(() => SND.chime(n, 0.2 - i * 0.02), i * 140)); return; }
@@ -1068,6 +1160,7 @@ export async function mountRoom(host, opts) {
     stepToys(dt, t);
     stepCat(dt, t);
     stepFriends(dt, t);
+    stepGifts(dt, t);
     // music → fairy lights, speaker LEDs and woofer
     const v = VIZ.sample(t, S.musicPlaying);
     bulbs.forEach((b, i) => { b.material.emissiveIntensity = 1.4 + Math.sin(t * 2 + i) * 0.6 + v.bins[(i * 3) % VIZ.BINS] * 3.2; });
@@ -1122,6 +1215,8 @@ export async function mountRoom(host, opts) {
       if ('sessions' in next && next.sessions !== prev.sessions) growPlant();
       if ('posterImage' in next || 'posterColors' in next) { if (next.posterImage !== prev.posterImage || JSON.stringify(next.posterColors) !== JSON.stringify(prev.posterColors)) updatePoster(); }
       if ('posters' in next) updateFrames();
+      if ('gifts' in next) updateSill();
+      if ('giftsPending' in next) syncGifts();
       if ('accent' in next || 'wall' in next) { applyTheme(); screen.redraw(); calTex.redraw(); clockTex.redraw(); }
       if (next.custom && JSON.stringify(next.custom) !== JSON.stringify(C)) { const relayout = JSON.stringify(next.custom.layout) !== JSON.stringify(C.layout); C = next.custom; applyCustom(); if (relayout) applyLayout(); }
       if (next.weather && next.weather !== weather) setWeather(next.weather);

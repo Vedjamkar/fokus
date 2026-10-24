@@ -21,6 +21,8 @@ let onTimerFn = () => {};
 export const onTimer = (fn) => { onTimerFn = fn; };
 let onActFn = () => {};
 export const onAct = (fn) => { onActFn = fn; };
+let onGiftFn = () => {};
+export const onGift = (fn) => { onGiftFn = fn; };
 
 let clients = [], beat = 0, giveUp = 0;
 const seen = new Set(), seenOrder = [];
@@ -108,6 +110,7 @@ function handle(raw) {
   if (msg.t === 'chat' && msg.line) addChat(msg.line);
   if (msg.t === 'history' && Array.isArray(msg.lines)) msg.lines.forEach(addChat);
   if (msg.t === 'timer') onTimerFn(msg.timer, msg.by);
+  if (msg.t === 'gift' && typeof msg.item === 'string') { const m = TG.members.get(msg.from); onGiftFn({ id: msg.mid, item: msg.item.slice(0, 20), from: m?.name || msg.name || 'A friend', color: m?.color || msg.color || '#e0725f', at: Date.now() }); }
   if (msg.t === 'act' && typeof msg.act === 'string') { lastSeen.set(msg.from, Date.now()); onActFn(msg.from, msg.act.slice(0, 20), TG.members.get(msg.from)?.name || 'Someone'); }
   emit();
 }
@@ -165,6 +168,12 @@ export function say(text) {
   if (TG.status !== 'on' || !text.trim()) return;
   const line = { id: mid(), from: TG.me.name, color: TG.me.color, text: text.trim().slice(0, 400), at: Date.now() };
   addChat(line); send({ t: 'chat', line }); emit();
+}
+// a present for everyone else in the room
+export function gift(item) {
+  if (TG.status !== 'on') return false;
+  send({ t: 'gift', item, name: TG.me.name, color: TG.me.color });
+  return true;
 }
 // a quick action (wave, cheer, …) that everyone else sees on your character
 export function act(a) {

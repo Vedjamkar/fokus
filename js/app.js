@@ -757,6 +757,8 @@ function roomState() {
     lampOn: S.settings.roomLamp ?? true,
     custom: roomCfg(),
     posters: posterSrcs(),
+    gifts: S.gifts || [],
+    giftsPending: S.giftsPending || [],
     labels: S.settings.roomLabels ?? true,
     bright: S.settings.roomBright ?? 1,
   };
@@ -811,6 +813,14 @@ function roomPick(id, data) {
     pet: () => {},
     speaker: () => openPop('music'),
     lights: () => { setRoomCfg({ lights: data.lights }, true); },
+    'gift-open': () => {
+      const g = (S.giftsPending || []).find((x) => x.id === data.id); if (!g) return;
+      S.giftsPending = S.giftsPending.filter((x) => x.id !== data.id);
+      S.gifts = [...(S.gifts || []), g].slice(-30); save();
+      room?.update({ gifts: S.gifts, giftsPending: S.giftsPending });
+      const [, e, name] = giftInfo(g.item);
+      toast(`${e} ${name[0].toUpperCase()}${name.slice(1)} from ${g.from}. It’s on your window sill.`);
+    },
     poster: () => go('#/studio'),
     frame: () => pickPoster(data.slot),
     chair: () => { ui.mode = 'focus'; saveUI(); renderStage(); if (!T.running) ACTS['t-toggle'](); },
@@ -852,12 +862,13 @@ const ROOM_ACTS = {
   'room-labels': (el) => { S.settings.roomLabels = !(S.settings.roomLabels ?? true); save(); room?.setLabels(S.settings.roomLabels); el.classList.toggle('on', S.settings.roomLabels); },
   'tg-create': () => { const me = meMember(); TGM.create(me); },
   'tg-leave': () => { TGM.leave(); },
+  'tg-gift': () => giveGift(false),
   'tg-act': (el) => {
     if (Date.now() - lastAct < 1200) return; // no spamming the room
     const A = ACTIONS.find((x) => x[0] === el.dataset.a);
     if (A && TGM.act(A[0])) { lastAct = Date.now(); if (!(ui.mode === 'room' && room?.friendAct(myId, A[0]))) toast(`You ${A[3]} ${A[1]}`); el.animate?.([{ transform: 'scale(1.35)' }, { transform: 'scale(1)' }], { duration: 300 }); }
   },
-  'tg-join-pending': () => { const c = ui.pendingJoin; if (!S.settings.userName?.trim()) { $('[data-input="tg-name"]', popTogether)?.focus(); return toast('Add your name so friends know who joined'); } TGM.join(c, meMember()); },
+  'tg-join-pending': () => { const c = ui.pendingJoin; if (!S.settings.userName?.trim()) { $('[data-input="tg-name"]', popTogether)?.focus(); return toast('Add your name so friends know who joined'); } ui.giftOnJoin = true; TGM.join(c, meMember()); },
   'tg-forget-invite': () => { ui.pendingJoin = ''; popTogether.innerHTML = togetherHTML(); },
   'tg-copy': async (el) => { try { await navigator.clipboard.writeText(el.dataset.text); toast('Copied'); } catch { toast(el.dataset.text); } },
   'tg-sync': () => { ui.syncTimer = !ui.syncTimer; popTogether.innerHTML = togetherHTML(); if (ui.syncTimer) timerChanged(true); },
@@ -1053,7 +1064,25 @@ let applyingRemote = false;
 // ---------------------------------------------------------------- actions friends see on your character
 const ACTIONS = [['wave', '👋', 'Wave', 'waved'], ['cheer', '🎉', 'Cheer', 'cheered'], ['clap', '👏', 'Clap', 'clapped'], ['heart', '❤️', 'Send a heart', 'sent a heart'],
   ['highfive', '✋', 'High five', 'wants a high five'], ['coffee', '☕', 'Coffee break', 'is having a coffee'], ['sleepy', '😴', 'Sleepy', 'is sleepy']];
-const actBarHTML = () => `<div class="act-bar" role="toolbar" aria-label="Actions your friends see">${ACTIONS.map(([k, e, l]) => `<button data-act="tg-act" data-a="${k}" title="${l}" aria-label="${l}">${e}</button>`).join('')}</div>`;
+const actBarHTML = () => `<div class="act-bar" role="toolbar" aria-label="Actions your friends see">${ACTIONS.map(([k, e, l]) => `<button data-act="tg-act" data-a="${k}" title="${l}" aria-label="${l}">${e}</button>`).join('')}<button data-act="tg-gift" title="Give everyone a gift" aria-label="Give everyone a gift">🎁</button></div>`;
+// ---------------------------------------------------------------- gifts: friends bring one when they arrive
+const GIFTS = [['succulent', '🪴', 'a little succulent'], ['cookie', '🍪', 'a cookie'], ['cupcake', '🧁', 'a cupcake'], ['flowers', '💐', 'some flowers'],
+  ['star', '⭐', 'a lucky star'], ['duck', '🦆', 'a rubber duck'], ['cocoa', '☕', 'a hot cocoa'], ['crystal', '🔮', 'a crystal']];
+const giftInfo = (k) => GIFTS.find((g) => g[0] === k) || GIFTS[0];
+let lastGift = 0;
+function giveGift(arriving) {
+  if (!arriving && Date.now() - lastGift < 30_000) return toast('One gift every 30 seconds');
+  if (TGM.TG.members.size < 2) return arriving ? null : toast('Nobody else is here yet');
+  const [k, e, name] = GIFTS[Math.floor(Math.random() * GIFTS.length)];
+  if (TGM.gift(k)) { lastGift = Date.now(); toast(`You brought everyone ${name} ${e}`); }
+}
+TGM.onGift((g) => {
+  S.giftsPending = [...(S.giftsPending || []), g].slice(-8); save();
+  room?.update({ giftsPending: S.giftsPending });
+  const [, e] = giftInfo(g.item);
+  toast(`🎁 ${g.from} brought you a gift${ui.mode === 'room' ? ' · click it to open' : ' · it’s waiting in your room'}`);
+  SND.chime(4, 0.12);
+});
 let lastAct = 0;
 TGM.onAct((id, a, name) => {
   const A = ACTIONS.find((x) => x[0] === a); if (!A) return;
@@ -1076,6 +1105,8 @@ function pushFriends() {
 }
 let hudHadBar = false;
 TGM.onChange(() => {
+  // arriving in a friend's room: bring everyone a little present
+  if (TGM.TG.status === 'on' && ui.giftOnJoin) { ui.giftOnJoin = false; setTimeout(() => giveGift(true), 3500); }
   const bar = TGM.TG.status === 'on';
   if (ui.mode === 'room' && bar !== hudHadBar) { hudHadBar = bar; const ae = document.activeElement?.dataset?.input === 't-task'; center.innerHTML = roomHudHTML(); if (ae) $('[data-input="t-task"]')?.focus(); }
   if (TGM.TG.status === 'on') ui.pendingJoin = '';
@@ -1092,7 +1123,7 @@ TGM.onChange(() => {
 setInterval(() => { if (TGM.TG.status === 'on') { pushFriends(); if (ui.pop === 'together') $$('[data-fclock]', popTogether).forEach((e) => { const m = TGM.TG.members.get(e.dataset.fclock); if (m) e.textContent = statusText(m); }); } }, 1000);
 setInterval(() => { if (TGM.TG.status === 'on') pushPresence(); }, 20_000);
 const statusText = (m) => (m.status === 'focus' ? `focusing ${friendClock(m)}` : m.status === 'break' ? `break ${friendClock(m)}` : 'here');
-function joinRoom(codeStr) { ui.pendingJoin = ''; TGM.join(codeStr, meMember()); }
+function joinRoom(codeStr) { ui.pendingJoin = ''; ui.giftOnJoin = true; TGM.join(codeStr, meMember()); }
 function togetherHTML() {
   const TG = TGM.TG;
   const head = `<div class="pop-head"><span class="chip-ic">${ic('users')}</span><b>Study together</b><span class="spacer"></span><button class="sq sm" data-act="pop" data-pop="together" aria-label="Close">${ic('x')}</button></div>`;
@@ -1927,7 +1958,7 @@ render();
   if (code) {
     history.replaceState(null, '', location.pathname + location.hash);
     ui.pendingJoin = code.toUpperCase().slice(0, 5);
-    if (S.settings.userName?.trim()) TGM.join(ui.pendingJoin, meMember());
+    if (S.settings.userName?.trim()) { ui.giftOnJoin = true; TGM.join(ui.pendingJoin, meMember()); }
     openPop('together');
   } else TGM.resume(meMember());
 }
