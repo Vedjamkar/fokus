@@ -1317,6 +1317,8 @@ TGM.onGift((g) => {
   toast(`🎁 ${g.from} brought you a gift${ui.mode === 'room' ? ' · click it to open' : ' · it’s waiting in your room'}`);
   SND.chime(4, 0.12);
 });
+// chat appears over the speaker's character in the room, like the reactions do
+TGM.onChat((id, line) => { if (ui.mode === 'room') room?.friendSay(id, line.text); });
 let lastAct = 0;
 TGM.onAct((id, a, name) => {
   const A = ACTIONS.find((x) => x[0] === a); if (!A) return;

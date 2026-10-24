@@ -605,7 +605,8 @@ export async function mountRoom(host, opts) {
   const ledBins = new Float32Array(14);
 
   // ---------- little sprites: speech bubble, hearts, z's
-  const bubbleTex = canvasTex(640, 200, (g, w, h, text = '') => {
+  // one drawing for every speech bubble: the cat's and each character's chat
+  const drawBubble = (g, w, h, text = '') => {
     if (!text) return;
     g.font = font(650, 34);
     const words = text.split(' '), lines = [''];
@@ -615,7 +616,8 @@ export async function mountRoom(host, opts) {
     g.beginPath(); g.moveTo(w / 2 - 18, y + bh - 1); g.lineTo(w / 2, h - 6); g.lineTo(w / 2 + 16, y + bh - 1); g.fill();
     g.fillStyle = '#2a2140'; g.textAlign = 'center';
     lines.forEach((l, i) => g.fillText(l, w / 2, y + 50 + i * 44));
-  });
+  };
+  const bubbleTex = canvasTex(640, 200, drawBubble);
   const bubble = new THREE.Sprite(new THREE.SpriteMaterial({ map: bubbleTex.tex, transparent: true, depthWrite: false, depthTest: false, opacity: 0 }));
   bubble.scale.set(3.6, 1.125, 1); bubble.renderOrder = 12; scene.add(bubble);
   let bubbleT = 0;
@@ -765,7 +767,7 @@ export async function mountRoom(host, opts) {
         const built = buildFriend(f);
         const lt = labelTex(...labelFor(f));
         const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: lt.tex, transparent: true, depthWrite: false, depthTest: false })); label.scale.set(2.2, 0.55, 1); label.renderOrder = 10;
-        fr = { ...built, sig, label, lt, labelText: labelFor(f).join(), act: fr?.act || null };
+        fr = { ...built, sig, label, lt, labelText: labelFor(f).join(), act: fr?.act || null, bubble: fr?.bubble || null };
         friends.set(f.id, fr);
         friendGroup.add(pick(fr.g, 'friend', { id: f.id, name: f.name, task: f.task, status: f.status }), label);
       }
@@ -778,7 +780,7 @@ export async function mountRoom(host, opts) {
       fr.label.position.set(x, 2.55, z);
       fr.status = f.status;
     });
-    for (const [id, fr] of friends) if (!keep.has(id)) { friendGroup.remove(fr.g, fr.label); if (fr.emoji) scene.remove(fr.emoji); friends.delete(id); }
+    for (const [id, fr] of friends) if (!keep.has(id)) { friendGroup.remove(fr.g, fr.label); if (fr.emoji) scene.remove(fr.emoji); dropBubble(fr); friends.delete(id); }
     pickables.splice(0, pickables.length, ...pickables.filter((p) => p.userData.pick.id !== 'friend' || [...friends.values()].some((fr) => fr.g === p)));
   }
   // ---------- actions: wave, cheer, clap, heart, highfive, coffee, sleepy
@@ -796,6 +798,23 @@ export async function mountRoom(host, opts) {
     if (act === 'highfive') setTimeout(() => SND.clack(0.4), 450);
     return true;
   }
+  // chat shows over the speaker's head for a few seconds, longer for longer lines
+  let saidN = 0;
+  function friendSay(id, text) {
+    const fr = friends.get(id);
+    if (!fr || !text) return false;
+    if (!fr.bubble) {
+      const t = canvasTex(640, 200, drawBubble);
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t.tex, transparent: true, depthWrite: false, depthTest: false, opacity: 0 }));
+      sp.scale.set(2.9, 0.906, 1); sp.renderOrder = 11; scene.add(sp);
+      fr.bubble = { sp, t, left: 0, total: 0 };
+    }
+    fr.bubble.t.redraw(text);
+    fr.bubble.sp.renderOrder = 11 + (++saidN % 200); // the newest line draws on top if neighbours talk at once
+    fr.bubble.total = fr.bubble.left = Math.min(9, Math.max(4, 3 + text.length * 0.06));
+    return true;
+  }
+  const dropBubble = (fr) => { if (fr.bubble) { scene.remove(fr.bubble.sp); fr.bubble.t.tex.dispose(); fr.bubble.sp.material.dispose(); } };
   const lerp = (a, b, k) => a + (b - a) * k;
   function stepFriends(dt, t) {
     for (const fr of friends.values()) {
@@ -814,9 +833,16 @@ export async function mountRoom(host, opts) {
         if (a.act === 'heart') { nod = Math.sin(k * 3) * 0.12; if (Math.random() < dt * 5) { const wp2 = P.head.getWorldPosition(new THREE.Vector3()); puff(heartTex, wp2.x + (Math.random() - 0.5) * 0.5, wp2.y + 0.35, wp2.z, 0.28); } }
         if (a.act === 'coffee') { P.mug.visible = true; rx = lerp(rx, -2.2, ease); rz = lerp(rz, -0.5, ease); nod = -0.12 * ease; }
         if (a.act === 'sleepy') { eyesClosed = true; nod = (0.25 + Math.sin(k * 2.2) * 0.12) * ease; if (Math.random() < dt * 1.2) { const wp2 = P.head.getWorldPosition(new THREE.Vector3()); puff(zTex, wp2.x + 0.25, wp2.y + 0.4, wp2.z, 0.26); } }
-        if (fr.emoji) { const wp2 = P.head.getWorldPosition(new THREE.Vector3()); fr.emoji.position.set(wp2.x, wp2.y + 1.45 + Math.sin(k * 4) * 0.05, wp2.z); fr.emoji.material.opacity = Math.max(0, Math.min(1, k * 5, (L - k) * 3)); }
+        if (fr.emoji) { const wp2 = P.head.getWorldPosition(new THREE.Vector3()); fr.emoji.position.set(wp2.x, wp2.y + 1.45 + (fr.bubble?.left > 0 ? 0.85 : 0) + Math.sin(k * 4) * 0.05, wp2.z); fr.emoji.material.opacity = Math.max(0, Math.min(1, k * 5, (L - k) * 3)); }
         if (k >= L) { fr.act = null; if (fr.emoji) { scene.remove(fr.emoji); fr.emoji = null; } }
       }
+      const B = fr.bubble;
+      if (B && B.left > 0) {
+        B.left -= dt;
+        const wp2 = P.head.getWorldPosition(new THREE.Vector3());
+        B.sp.position.set(wp2.x, wp2.y + 1.6, wp2.z);
+        B.sp.material.opacity = Math.max(0, Math.min(1, B.left * 2, (B.total - B.left) * 5));
+      } else if (B) B.sp.material.opacity = 0;
       const s2 = Math.min(1, dt * 12);
       P.arms[0].rotation.x = lerp(P.arms[0].rotation.x, lx, s2); P.arms[0].rotation.z = lerp(P.arms[0].rotation.z, lz, s2);
       P.arms[1].rotation.x = lerp(P.arms[1].rotation.x, rx, s2); P.arms[1].rotation.z = lerp(P.arms[1].rotation.z, rz, s2);
@@ -1321,6 +1347,7 @@ export async function mountRoom(host, opts) {
     },
     setFriends,
     friendAct,
+    friendSay,
     say(text) { if (!cat.visible) return false; say(text); if (catMode === 'sleep') { catMode = 'idle'; catPoke = clockT.getElapsedTime(); } return true; },
     setLabels(on) { tags.visible = on; },
     setArrange(on) { arrange = on; setGlow(null, false); hovered = null; tip.hidden = true; if (!on) endDrag(); },

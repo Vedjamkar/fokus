@@ -22,6 +22,9 @@ export const onTimer = (fn) => { onTimerFn = fn; };
 let onActFn = () => {};
 export const onAct = (fn) => { onActFn = fn; };
 let onGiftFn = () => {};
+// a chat line as it's said (not history catching you up), with who said it, for speech bubbles
+let onChatFn = () => {};
+export const onChat = (fn) => { onChatFn = fn; };
 export const onGift = (fn) => { onGiftFn = fn; };
 // the room's shared task list: changes arrive one task at a time, and whole lists catch newcomers up
 let onTasksFn = () => {};
@@ -116,7 +119,7 @@ function handle(raw) {
     if (isNew && msg.hello) { announce(); shareHistory(); } // say hi back so they see us straight away
   }
   if (msg.t === 'bye') { TG.members.delete(msg.id); lastSeen.delete(msg.id); }
-  if (msg.t === 'chat' && msg.line) addChat(msg.line);
+  if (msg.t === 'chat' && msg.line) { addChat(msg.line); if (typeof msg.line.text === 'string') onChatFn(msg.from, msg.line); }
   if (msg.t === 'history' && Array.isArray(msg.lines)) msg.lines.forEach(addChat);
   if (msg.t === 'timer') onTimerFn(msg.timer, msg.by);
   if (msg.t === 'task' && msg.task?.id) onTasksFn([msg.task]);
@@ -180,7 +183,7 @@ export function updateMe(me) {
 export function say(text) {
   if (TG.status !== 'on' || !text.trim()) return;
   const line = { id: mid(), from: TG.me.name, color: TG.me.color, text: text.trim().slice(0, 400), at: Date.now() };
-  addChat(line); send({ t: 'chat', line }); emit();
+  addChat(line); send({ t: 'chat', line }); onChatFn(TG.me.id, line); emit();
 }
 // a present for everyone else in the room
 export function gift(item) {
