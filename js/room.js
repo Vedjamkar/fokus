@@ -11,7 +11,7 @@ const LABELS = {
   laptop: 'Notes', shelf: 'Textbooks & slides', book: 'Subject', calendar: 'Calendar', board: 'What’s due',
   clock: 'Start / pause timer', record: 'Music', window: 'Change the weather', lamp: 'Lamp', plant: 'Your streak plant',
   mug: 'Tea', cat: 'Mochi the cat', poster: 'Aesthetic studio', frame: 'Your poster · click to change', lights: 'Fairy lights', chair: 'Sit down to focus', friend: 'Friend',
-  yarn: 'Throw the yarn', globe: 'Spin the globe', cradle: 'Newton’s cradle', chime: 'Wind chime', speaker: 'Visualiser · music',
+  tasks: 'Task list · tick things off together', yarn: 'Throw the yarn', globe: 'Spin the globe', cradle: 'Newton’s cradle', chime: 'Wind chime', speaker: 'Visualiser · music',
 };
 
 export async function mountRoom(host, opts) {
@@ -327,6 +327,45 @@ export async function mountRoom(host, opts) {
   board.add(at(box(2.6, 1.95, 0.08, mat(0xffffff, { map: boardTex.tex }), 0.02), 0, 0, 0));
   board.add(at(box(2.75, 2.1, 0.06, mat(0x6e4630), 0.03), 0, 0, -0.03));
   scene.add(pick(board, 'board'));
+
+  // ---------- task list: a whiteboard on an easel. "Together" is the study room's shared list, "Mine" is yours,
+  // and friends' own lists show as a tally at the bottom
+  const tasksTex = canvasTex(512, 640, (g, w, h) => {
+    const L = S.tasks || { shared: [], mine: [], friends: [], inRoom: false };
+    const ink = S.accent || '#c2593b';
+    g.fillStyle = '#f6f4ee'; g.fillRect(0, 0, w, h);
+    g.fillStyle = 'rgba(40,40,60,.05)'; for (let i = 0; i < 26; i++) g.fillRect((i * 97) % w, (i * 53) % h, 40 + (i * 31) % 90, 2); // old marker ghosts
+    let y = 20;
+    const head = (t) => { y += 46; g.fillStyle = ink; g.font = hand(48); g.fillText(t, 26, y); y += 10; };
+    const row = (t) => {
+      g.strokeStyle = '#2b2838'; g.lineWidth = 3; g.strokeRect(30, y + 8, 24, 24);
+      if (t.done) { g.strokeStyle = ink; g.lineWidth = 5; g.lineCap = 'round'; g.beginPath(); g.moveTo(33, y + 20); g.lineTo(41, y + 30); g.lineTo(58, y + 4); g.stroke(); }
+      const text = t.text.length > 25 ? `${t.text.slice(0, 24)}…` : t.text;
+      g.fillStyle = t.done ? '#9a968c' : '#24212c'; g.font = hand(34); g.fillText(text, 68, y + 31);
+      if (t.done) { g.strokeStyle = '#9a968c'; g.lineWidth = 2; g.beginPath(); g.moveTo(66, y + 21); g.lineTo(70 + g.measureText(text).width, y + 21); g.stroke(); }
+      y += 42;
+    };
+    const more = (n) => { if (n > 0) { g.fillStyle = '#8a8679'; g.font = hand(28); g.fillText(`+ ${n} more`, 68, y + 22); y += 32; } };
+    const list = (items, max) => { items.slice(0, max).forEach(row); more(items.length - max); };
+    if (L.inRoom) { head('Together'); if (L.shared.length) list(L.shared, 5); else { g.fillStyle = '#8a8679'; g.font = hand(30); g.fillText('nothing shared yet', 34, y + 30); y += 42; } }
+    head('Mine');
+    if (L.mine.length) list(L.mine, L.inRoom ? 4 : 9); else { g.fillStyle = '#8a8679'; g.font = hand(30); g.fillText('click to add a task', 34, y + 30); y += 42; }
+    (L.friends || []).slice(0, 3).forEach((f, i) => {
+      const fy = h - 26 - i * 34;
+      g.fillStyle = f.color || '#888'; g.beginPath(); g.arc(36, fy - 9, 8, 0, 7); g.fill();
+      g.fillStyle = '#4a4656'; g.font = font(700, 20); g.fillText(`${f.name.slice(0, 16)} · ${f.done} of ${f.total} done`, 52, fy);
+    });
+  });
+  const easel = new THREE.Group(); at(easel, -1.7, 0, 4.0); easel.rotation.y = 0.7; easel.scale.setScalar(1.12);
+  const easelWood = mat(0x8a5a3b, { roughness: 0.8 });
+  const sheet = new THREE.Group(); at(sheet, 0, 2.05, 0); sheet.rotation.x = -0.1; easel.add(sheet);
+  sheet.add(at(box(1.5, 1.875, 0.04, mat(0xffffff, { map: tasksTex.tex, roughness: 0.6 }), 0.01), 0, 0, 0.03));
+  sheet.add(at(box(1.62, 1.99, 0.05, mat(0xd8d6d0, { roughness: 0.5 }), 0.02), 0, 0, 0));
+  sheet.add(at(box(1.5, 0.06, 0.16, easelWood, 0.01), 0, -1.0, 0.08)); // marker tray
+  sheet.add(at(cyl(0.025, 0.025, 0.26, mat(0x2f6fd8), 8).rotateZ(Math.PI / 2), 0.35, -0.95, 0.1));
+  for (const [x, z, tilt] of [[-0.6, 0.18, -0.07], [0.6, 0.18, 0.07]]) { const leg = cyl(0.035, 0.035, 3.0, easelWood, 8); at(leg, x, 1.45, z); leg.rotation.z = tilt; leg.rotation.x = -0.1; easel.add(leg); }
+  const back = cyl(0.035, 0.035, 2.9, easelWood, 8); at(back, 0, 1.38, -0.42); back.rotation.x = 0.3; easel.add(back);
+  scene.add(pick(easel, 'tasks'));
 
   // ---------- poster: shows your current background
   const posterTex = canvasTex(300, 400, (g, w, h, paint) => { g.fillStyle = '#1b1825'; g.fillRect(0, 0, w, h); paint?.(g, w, h); });
@@ -891,7 +930,7 @@ export async function mountRoom(host, opts) {
   }
   const wp = new THREE.Vector3();
   [['Notes', laptop, 1.75], ['Subjects', shelf, 5.75], ['Due', board, 1.35], ['Calendar', cal, 1.1], ['Timer', clock, 1.25], ['Music', table, 3.05],
-   ['Weather', win, 1.7], ['Studio', poster, 1.2], ['Streak', plant, 3.7], ['Focus', chair, 3.75]]
+   ['Weather', win, 1.7], ['Studio', poster, 1.2], ['Streak', plant, 3.7], ['Focus', chair, 3.75], ['Tasks', easel, 3.45]]
     .forEach(([text, obj, dy]) => { const sp = tagSprite(text); sp.userData.follow = obj; sp.userData.dy = dy; tags.add(sp); });
   function placeTags() { tags.children.forEach((sp) => { sp.userData.follow.getWorldPosition(wp); sp.position.set(wp.x, sp.userData.follow === shelf || sp.userData.follow === table || sp.userData.follow === plant || sp.userData.follow === chair ? sp.userData.dy : wp.y + sp.userData.dy, wp.z); }); }
   placeTags();
@@ -904,7 +943,7 @@ export async function mountRoom(host, opts) {
     const show = { plant: true, record: true, poster: true, lights: true, pet: true, gallery: true, toys: true, speaker: true, ...(C.show || {}) };
     plant.visible = show.plant; table.visible = show.record; poster.visible = show.poster; cat.visible = show.pet; gallery.visible = show.gallery;
     yarn.visible = globe.visible = cradle.visible = chimeG.visible = show.toys; speaker.visible = show.speaker;
-    lights.visible = show.lights && C.lights !== 'off';
+    lights.visible = show.lights && C.lights !== 'off'; easel.visible = show.tasks !== false;
     const lc = LIGHTS[C.lights] || LIGHTS.warm;
     bulbs.forEach((b, i) => b.material.emissive.set(lc[i % lc.length]));
     fur.color.set(PETS[C.pet] || PETS.black); syncOwn();
@@ -933,8 +972,8 @@ export async function mountRoom(host, opts) {
   for (const o of [laptop, lamp, mug, note, screenGlow, globe, cradle]) desk.attach(o);
   pick(desk, 'desk');
   const DRAG = new Map([[desk, 'floor'], [chair, 'floor'], [shelf, 'floor'], [table, 'floor'], [plant, 'floor'], [rugG, 'floor'], [cat, 'floor'],
-    [clock, 'back'], [poster, 'back'], [cal, 'left'], [board, 'left'], [gallery, 'left'], [speaker, 'floor']]);
-  const KEYS = new Map([[desk, 'desk'], [chair, 'chair'], [shelf, 'shelf'], [table, 'record'], [plant, 'plant'], [rugG, 'rug'], [cat, 'pet'], [clock, 'clock'], [poster, 'poster'], [cal, 'calendar'], [board, 'board'], [gallery, 'gallery'], [speaker, 'speaker']]);
+    [clock, 'back'], [poster, 'back'], [cal, 'left'], [board, 'left'], [gallery, 'left'], [speaker, 'floor'], [easel, 'floor']]);
+  const KEYS = new Map([[desk, 'desk'], [chair, 'chair'], [shelf, 'shelf'], [table, 'record'], [plant, 'plant'], [rugG, 'rug'], [cat, 'pet'], [clock, 'clock'], [poster, 'poster'], [cal, 'calendar'], [board, 'board'], [gallery, 'gallery'], [speaker, 'speaker'], [easel, 'tasks']]);
   const HOME = new Map([...DRAG.keys()].map((g) => [g, [g.position.x, g.position.y, g.position.z, g.rotation.y]]));
   function applyLayout() {
     for (const [g, key] of KEYS) {
@@ -1273,7 +1312,8 @@ export async function mountRoom(host, opts) {
       if ('gifts' in next) updateSill();
       if ('giftsPending' in next) syncGifts();
       if ('appName' in next && next.appName !== prev.appName) screen.redraw();
-      if ('accent' in next || 'wall' in next) { applyTheme(); screen.redraw(); calTex.redraw(); clockTex.redraw(); }
+      if ('accent' in next || 'wall' in next) { applyTheme(); screen.redraw(); calTex.redraw(); clockTex.redraw(); tasksTex.redraw(); }
+      else if ('tasks' in next && JSON.stringify(next.tasks) !== JSON.stringify(prev.tasks)) tasksTex.redraw();
       if (next.custom && JSON.stringify(next.custom) !== JSON.stringify(C)) { const relayout = JSON.stringify(next.custom.layout) !== JSON.stringify(C.layout); C = next.custom; applyCustom(); if (relayout) applyLayout(); }
       if (next.weather && next.weather !== weather) setWeather(next.weather);
       if ('lampOn' in next && next.lampOn !== lampOn) setLamp(next.lampOn);

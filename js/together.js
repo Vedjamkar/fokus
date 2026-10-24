@@ -23,6 +23,11 @@ let onActFn = () => {};
 export const onAct = (fn) => { onActFn = fn; };
 let onGiftFn = () => {};
 export const onGift = (fn) => { onGiftFn = fn; };
+// the room's shared task list: changes arrive one task at a time, and whole lists catch newcomers up
+let onTasksFn = () => {};
+export const onTasks = (fn) => { onTasksFn = fn; };
+let tasksNow = () => [];
+export const provideTasks = (fn) => { tasksNow = fn; };
 
 let clients = [], beat = 0, giveUp = 0;
 const seen = new Set(), seenOrder = [];
@@ -85,7 +90,11 @@ function nostrTransport(url, room) {
   return t;
 }
 function ready() {
-  if (TG.status !== 'on') { TG.status = 'on'; clearTimeout(giveUp); remember({ room: TG.room }); }
+  if (TG.status !== 'on') {
+    TG.status = 'on'; clearTimeout(giveUp); remember({ room: TG.room });
+    // bring along anything added to this room's list while we were away
+    setTimeout(() => { const list = tasksNow(); if (TG.status === 'on' && list.length) send({ t: 'tasks', list: list.slice(-80) }); }, 800);
+  }
   announce(true); emit();
 }
 function send(msg) {
@@ -110,6 +119,8 @@ function handle(raw) {
   if (msg.t === 'chat' && msg.line) addChat(msg.line);
   if (msg.t === 'history' && Array.isArray(msg.lines)) msg.lines.forEach(addChat);
   if (msg.t === 'timer') onTimerFn(msg.timer, msg.by);
+  if (msg.t === 'task' && msg.task?.id) onTasksFn([msg.task]);
+  if (msg.t === 'tasks' && Array.isArray(msg.list)) onTasksFn(msg.list.slice(0, 120));
   if (msg.t === 'gift' && typeof msg.item === 'string') { const m = TG.members.get(msg.from); onGiftFn({ id: msg.mid, item: msg.item.slice(0, 20), from: m?.name || msg.name || 'A friend', color: m?.color || msg.color || '#e0725f', at: Date.now() }); }
   if (msg.t === 'act' && typeof msg.act === 'string') { lastSeen.set(msg.from, Date.now()); onActFn(msg.from, msg.act.slice(0, 20), TG.members.get(msg.from)?.name || 'Someone'); }
   emit();
@@ -124,6 +135,8 @@ function shareHistory() {
   const oldest = [...TG.members.values()].every((m) => m.id === TG.me.id || !m.joinedAt || m.joinedAt >= mine);
   const lines = TG.chat.filter((l) => !l.sys).slice(-40);
   if (oldest && lines.length) send({ t: 'history', lines });
+  const list = tasksNow();
+  if (oldest && list.length) send({ t: 'tasks', list: list.slice(-80) });
 }
 function announce(hello) { send({ t: 'presence', member: TG.me, hello: !!hello }); }
 
@@ -179,6 +192,12 @@ export function gift(item) {
 export function act(a) {
   if (TG.status !== 'on') return false;
   send({ t: 'act', act: a });
+  return true;
+}
+// one shared task, sent whole whenever it changes (added, ticked, removed); the newest edit wins
+export function task(t) {
+  if (TG.status !== 'on') return false;
+  send({ t: 'task', task: t });
   return true;
 }
 export function shareTimer(timer) {

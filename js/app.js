@@ -15,7 +15,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const center = $('#center'), bl = $('#bl'), br = $('#br'), sheet = $('#sheet'), view = $('#view'), modal = $('#modal');
-const popDue = $('#pop-due'), popMusic = $('#pop-music'), popTogether = $('#pop-together'), popRoom = $('#pop-room');
+const popDue = $('#pop-due'), popMusic = $('#pop-music'), popTogether = $('#pop-together'), popRoom = $('#pop-room'), popTasks = $('#pop-tasks');
 // features defined further down register their handlers here before the main tables exist
 const ACTS_EXTRA = {}, CHANGES_EXTRA = {}, FORMS_EXTRA = {};
 
@@ -443,6 +443,7 @@ function closePops() {
   popDue.hidden = true;
   popTogether.hidden = true;
   popRoom.hidden = true;
+  popTasks.hidden = true;
   popMusic.classList.add('closed');
 }
 function openPop(which) {
@@ -454,6 +455,7 @@ function openPop(which) {
     if (which === 'music') { renderTracks(); renderMixer(); popMusic.classList.remove('closed'); }
     if (which === 'together') { popTogether.innerHTML = togetherHTML(); popTogether.hidden = false; }
     if (which === 'room') { popRoom.innerHTML = roomCfgHTML(); popRoom.hidden = false; }
+    if (which === 'tasks') { popTasks.innerHTML = tasksPopHTML(); popTasks.hidden = false; }
   }
   bl.innerHTML = blHTML();
 }
@@ -830,6 +832,7 @@ function roomState() {
     weather: S.settings.roomWeather || 'rain',
     lampOn: S.settings.roomLamp ?? true,
     custom: roomCfg(),
+    tasks: roomTasksState(),
     appName: S.settings.appName || 'FOKUS',
     posters: posterSrcs(),
     gifts: S.gifts || [],
@@ -888,6 +891,7 @@ function roomPick(id, data) {
     shelf: () => go('#/library/textbook'),
     calendar: () => go('#/calendar'),
     board: () => openPop('due'),
+    tasks: () => openPop('tasks'),
     clock: () => ACTS['t-toggle'](),
     record: () => { if (!YT.P.id && !YT.P.list && S.music.saved[0]) YT.play(S.music.saved[0].url, S.music.saved[0]); openPop('music'); },
     weather: () => { S.settings.roomWeather = data.weather; save(); if (ui.pop === 'room') popRoom.innerHTML = roomCfgHTML(); if (data.weather === 'rain' && !(S.settings.sounds?.rain > 0)) toast('Rain sounds live in the Music panel'); else toast(data.weather === 'snow' ? 'Snowing ❄' : data.weather === 'clear' ? 'Clear skies' : 'Raining'); },
@@ -964,7 +968,7 @@ const ROOM_ACTS = {
 
 
 // ---------------------------------------------------------------- room customiser
-const ROOM_DEFAULTS = { view: 'city', time: 'auto', wall: 'auto', floor: 'oak', rug: 'accent', curtains: 'accent', lights: 'warm', pet: 'black', petName: 'Mochi', show: { plant: true, record: true, poster: true, lights: true, pet: true, gallery: true, toys: true, speaker: true } };
+const ROOM_DEFAULTS = { view: 'city', time: 'auto', wall: 'auto', floor: 'oak', rug: 'accent', curtains: 'accent', lights: 'warm', pet: 'black', petName: 'Mochi', show: { plant: true, record: true, poster: true, lights: true, pet: true, gallery: true, toys: true, speaker: true, tasks: true } };
 const roomCfg = () => ({ ...ROOM_DEFAULTS, ...(S.settings.room || {}), show: { ...ROOM_DEFAULTS.show, ...(S.settings.room?.show || {}) } });
 function setRoomCfg(patch, quiet) {
   S.settings.room = { ...roomCfg(), ...patch };
@@ -986,6 +990,7 @@ const LIGHT_COLORS = { warm: ['#ffc46b'], pink: ['#ff7ab0'], blue: ['#7ad7ff'], 
 const svg = (body) => `<svg viewBox="0 0 80 50" aria-hidden="true">${body}</svg>`;
 const catArt = (c) => svg(`<rect width="80" height="50" fill="#1d1a2b"/><ellipse cx="38" cy="36" rx="17" ry="9" fill="${c}"/><circle cx="55" cy="27" r="8" fill="${c}"/><path d="M49 22l2-7 4 5zM57 20l4-5 1 7z" fill="${c}"/><path d="M22 36q-10-2-8-14" stroke="${c}" stroke-width="3" fill="none" stroke-linecap="round"/><circle cx="58" cy="26" r="1.3" fill="#f5d76e"/><circle cx="53" cy="26" r="1.3" fill="#f5d76e"/>`);
 const ITEM_ART = {
+  tasks: svg('<rect width="80" height="50" fill="#1d1a2b"/><path d="M30 46l6-38M50 46l-6-38" stroke="#8a5a3b" stroke-width="2"/><rect x="25" y="6" width="30" height="30" fill="#f6f4ee"/><rect x="29" y="11" width="4" height="4" fill="none" stroke="#2b2838"/><path d="M36 13h14M36 21h12M36 29h10" stroke="#2b2838"/><rect x="29" y="19" width="4" height="4" fill="none" stroke="#2b2838"/><path d="M29.5 21l1.5 1.5 3-4" stroke="#c2593b" fill="none" stroke-width="1.5"/>'),
   plant: svg('<rect width="80" height="50" fill="#1d1a2b"/><path d="M32 30h16l-2 16H34z" fill="#d98b5f"/><ellipse cx="34" cy="22" rx="7" ry="4" fill="#3f8f5f" transform="rotate(-30 34 22)"/><ellipse cx="46" cy="20" rx="7" ry="4" fill="#3f8f5f" transform="rotate(25 46 20)"/><ellipse cx="40" cy="14" rx="4" ry="7" fill="#4f9a6a"/>'),
   record: svg('<rect width="80" height="50" fill="#1d1a2b"/><rect x="20" y="12" width="40" height="30" rx="3" fill="#6e4630"/><circle cx="37" cy="27" r="12" fill="#111"/><circle cx="37" cy="27" r="4" fill="var(--accent)"/><path d="M52 16l-3 16" stroke="#ccc" stroke-width="2"/>'),
   poster: svg('<rect width="80" height="50" fill="#1d1a2b"/><rect x="28" y="6" width="24" height="38" fill="#e8e1d6"/><rect x="31" y="9" width="18" height="32" fill="url(#pg)"/>' + svgGrad('pg', ['#1c1240', '#6c47ff', '#e0725f'])),
@@ -1168,7 +1173,7 @@ function roomCfgHTML() {
     <div class="rc-sec"><b>Pet</b><div class="vis-grid">${Object.entries({ black: 'Black', orange: 'Ginger', white: 'White', grey: 'Grey', cream: 'Cream' }).map(([v, l]) => tile('rc', `data-k="pet" data-v="${v}"`, catArt(PET_COLORS[v]), l, c.pet === v)).join('')}</div>
       <input class="input" data-input="rc-name" value="${esc(c.petName)}" placeholder="Pet’s name" maxlength="20" aria-label="Pet’s name">
       <div class="chips"><button class="chip ${S.settings.catSounds !== false ? 'on' : ''}" data-act="cat-opt" data-k="catSounds" aria-pressed="${S.settings.catSounds !== false}">Meows & toy sounds</button><button class="chip ${S.settings.catCheer !== false ? 'on' : ''}" data-act="cat-opt" data-k="catCheer" aria-pressed="${S.settings.catCheer !== false}">Encourages me every 5 min</button></div></div>
-    <div class="rc-sec"><b>In the room</b><div class="vis-grid">${[['plant', 'Plant'], ['record', 'Record player'], ['speaker', 'Speaker'], ['toys', 'Toys'], ['poster', 'Poster'], ['gallery', 'Gallery wall'], ['lights', 'Fairy lights'], ['pet', 'Pet']].map(([k, l]) => tile('rc-show', `data-k="${k}"`, k === 'pet' ? catArt(PET_COLORS[c.pet] || '#2b2838') : ITEM_ART[k], l, c.show[k], !c.show[k])).join('')}</div></div>
+    <div class="rc-sec"><b>In the room</b><div class="vis-grid">${[['plant', 'Plant'], ['record', 'Record player'], ['speaker', 'Speaker'], ['tasks', 'Task board'], ['toys', 'Toys'], ['poster', 'Poster'], ['gallery', 'Gallery wall'], ['lights', 'Fairy lights'], ['pet', 'Pet']].map(([k, l]) => tile('rc-show', `data-k="${k}"`, k === 'pet' ? catArt(PET_COLORS[c.pet] || '#2b2838') : ITEM_ART[k], l, c.show[k], !c.show[k])).join('')}</div></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="rc-layout">Reset furniture layout</button><button class="btn ghost" data-act="rc-reset">Reset everything</button></div>
   </div>`;
 }
@@ -1185,6 +1190,94 @@ Object.assign(ACTS_EXTRA, {
 });
 Object.assign(CHANGES_EXTRA, { 'rc-color': (el) => setRoomCfg({ [el.dataset.k]: el.value }) });
 
+// ---------------------------------------------------------------- task list (the whiteboard in the room)
+// Mine: only you tick them, and friends see them through your presence. Together: one list per study
+// room that anyone in it can add to and tick. Every change carries a time and the newest edit wins, so
+// lists that changed while people were apart merge cleanly when they meet again. Removed tasks stay as
+// a "del" marker so a friend who missed the removal doesn't bring them back.
+const tasksOf = () => (S.roomTasks ||= { mine: [], shared: {} });
+const myTasks = () => tasksOf().mine;
+const inRoom = () => TGM.TG.status === 'on';
+const sharedList = () => (tasksOf().shared[TGM.TG.room] ||= []);
+const live = (l) => l.filter((t) => !t.del);
+const myName = () => S.settings.userName?.trim() || 'Someone';
+function roomTasksState() {
+  const friends = [...TGM.TG.members.values()].filter((m) => m.id !== myId && Array.isArray(m.tasks) && m.tasks.length)
+    .map((m) => ({ name: m.name || 'Friend', color: m.color, done: m.tasks.filter((t) => t.done).length, total: m.tasks.length }));
+  return { inRoom: inRoom(), shared: inRoom() ? live(sharedList()).map(({ text, done }) => ({ text, done })) : [], mine: live(myTasks()).map(({ text, done }) => ({ text, done })), friends };
+}
+let lastTasksSig = '';
+function tasksChanged(fromNetwork) {
+  const st = roomTasksState(), sig = JSON.stringify(st);
+  if (sig === lastTasksSig && fromNetwork) return;
+  lastTasksSig = sig;
+  room?.update({ tasks: st });
+  if (ui.pop === 'tasks') { const ae = document.activeElement, keep = ae?.closest?.('#pop-tasks form') ? ae.value : null; popTasks.innerHTML = tasksPopHTML(); if (keep !== null) { const i = $('#pop-tasks form input'); i.value = keep; i.focus(); } }
+}
+function mergeShared(list) {
+  if (!inRoom()) return;
+  const cur = sharedList(); let changed = false;
+  for (const t of list) {
+    if (!t?.id || typeof t.text !== 'string') continue;
+    const c = { id: String(t.id).slice(0, 40), text: t.text.slice(0, 200), done: !!t.done, by: String(t.by || '').slice(0, 40), doneBy: String(t.doneBy || '').slice(0, 40), at: +t.at || 0, del: !!t.del };
+    const i = cur.findIndex((x) => x.id === c.id);
+    if (i < 0) { cur.push(c); changed = true; } else if (c.at > cur[i].at) { cur[i] = c; changed = true; }
+  }
+  if (changed) { save(); tasksChanged(); }
+}
+TGM.provideTasks(() => (inRoom() ? sharedList() : []));
+TGM.onTasks(mergeShared);
+// change a task in either list and tell whoever needs to know
+function editTask(list, id, patch) {
+  const arr = list === 'shared' ? sharedList() : myTasks();
+  const t = arr.find((x) => x.id === id); if (!t) return;
+  Object.assign(t, patch, { at: Date.now() });
+  if (list === 'shared') { if (patch.del) Object.assign(t, { text: '' }); TGM.task(t); } else { if (patch.del) arr.splice(arr.indexOf(t), 1); pushPresence(); }
+  save(); tasksChanged();
+}
+function addTask(list, text) {
+  const t = { id: uid(), text: text.slice(0, 200), done: false, by: myName(), doneBy: '', at: Date.now(), del: false };
+  if (list === 'shared') { sharedList().push(t); TGM.task(t); } else { myTasks().push(t); pushPresence(); }
+  save(); tasksChanged();
+}
+function tasksPopHTML() {
+  const tab = ui.tasksTab || (inRoom() ? 'shared' : 'mine');
+  const row = (t, list, canTick = true) => `<div class="trow ${t.done ? 'done' : ''}">
+      <input type="checkbox" class="check" ${t.done ? 'checked' : ''} ${canTick ? `data-change="task-tick" data-list="${list}" data-id="${t.id}"` : 'disabled'} aria-label="Done">
+      <span class="t">${esc(t.text)}${list === 'shared' ? `<small>${t.done && t.doneBy ? `Ticked by ${esc(t.doneBy === myName() ? 'you' : t.doneBy)}` : `Added by ${esc(t.by === myName() ? 'you' : t.by || 'someone')}`}</small>` : ''}</span>
+      ${list ? `<button class="icon-btn" data-act="task-del" data-list="${list}" data-id="${t.id}" aria-label="Remove">${ic('x')}</button>` : ''}</div>`;
+  const add = (list, ph) => `<form class="row-input" data-form="task-add-${list}" style="padding:0"><input placeholder="${ph}" maxlength="200" aria-label="New task"><button class="pill accent">Add</button></form>`;
+  const sorted = (l) => [...live(l)].sort((a, b) => a.done - b.done);
+  let body;
+  if (tab === 'shared') {
+    body = inRoom()
+      ? `${sorted(sharedList()).map((t) => row(t, 'shared')).join('') || '<div class="empty">Nothing on the shared list yet. Anyone in the room can add to it and tick things off.</div>'}${add('shared', 'Add a task for everyone…')}`
+      : `<div class="empty">Start or join a study room and this becomes one list everyone in it can add to and tick off.<div style="margin-top:10px"><button class="btn" data-act="pop" data-pop="together">${ic('users')} Study together</button></div></div>`;
+  } else {
+    const friends = [...TGM.TG.members.values()].filter((m) => m.id !== myId && Array.isArray(m.tasks) && m.tasks.length);
+    body = `${sorted(myTasks()).map((t) => row(t, 'mine')).join('') || '<div class="empty">Your own list. Friends in your study room can see it, but only you can tick it.</div>'}${add('mine', 'Add a task…')}
+      <label class="switch" style="font-size:13px"><input type="checkbox" data-change="task-share" ${S.settings.shareMyTasks === false ? '' : 'checked'}> Friends can see my list</label>
+      ${friends.map((m) => `<div class="g-label"><i style="width:8px;height:8px;border-radius:50%;background:${esc(m.color || '#888')};display:inline-block;align-self:center"></i>${esc(m.name || 'Friend')}’s list · ${m.tasks.filter((t) => t.done).length} of ${m.tasks.length} done</div>${m.tasks.map((t) => row({ ...t, text: String(t.text || '').slice(0, 200) }, '', false)).join('')}`).join('')}`;
+  }
+  const n = (l) => live(l).filter((t) => !t.done).length;
+  return `<div class="pop-head"><span class="chip-ic">${ic('check')}</span><b>Task list</b><span class="spacer"></span><button class="sq sm" data-act="pop" data-pop="tasks" aria-label="Close">${ic('x')}</button></div>
+    <div class="pop-body">
+      <div class="tabs"><button class="${tab === 'shared' ? 'on' : ''}" data-act="tasks-tab" data-v="shared">Together ${inRoom() ? `<span class="count">${n(sharedList())}</span>` : ''}</button><button class="${tab === 'mine' ? 'on' : ''}" data-act="tasks-tab" data-v="mine">Mine <span class="count">${n(myTasks())}</span></button></div>
+      ${body}</div>`;
+}
+Object.assign(ACTS_EXTRA, {
+  'tasks-tab': (el) => { ui.tasksTab = el.dataset.v; popTasks.innerHTML = tasksPopHTML(); },
+  'task-del': (el) => editTask(el.dataset.list, el.dataset.id, { del: true }),
+});
+Object.assign(CHANGES_EXTRA, {
+  'task-tick': (el) => { editTask(el.dataset.list, el.dataset.id, { done: el.checked, doneBy: el.checked ? myName() : '' }); if (el.checked) SND.chime(4, 0.1); },
+  'task-share': (el) => { S.settings.shareMyTasks = el.checked; save(); pushPresence(); },
+});
+Object.assign(FORMS_EXTRA, {
+  'task-add-shared': (v) => { if (inRoom()) addTask('shared', v); },
+  'task-add-mine': (v) => addTask('mine', v),
+});
+
 // ---------------------------------------------------------------- study together
 const MEKEY = 'studyhaven:me';
 // per tab, so two windows on one computer count as two people (handy for trying a room alone)
@@ -1193,7 +1286,7 @@ function meMember() {
   const s = subjectById(T.subjectId);
   return { id: myId, name: S.settings.userName || 'Someone', color: S.settings.accent || '#6c47ff', task: T.task || '', subject: s?.code || s?.name || '',
     status: T.running ? (T.mode === 'focus' ? 'focus' : 'break') : 'idle', endAt: T.running ? T.endAt : 0, left: T.running ? 0 : T.left,
-    avatar: S.settings.avatar || {} };
+    avatar: S.settings.avatar || {}, tasks: S.settings.shareMyTasks === false ? [] : live(myTasks()).slice(0, 12).map((t) => ({ text: t.text, done: t.done })) };
 }
 const pushPresence = () => TGM.updateMe(meMember());
 function timerChanged(force) {
@@ -1259,6 +1352,7 @@ TGM.onChange(() => {
   }
   bl.innerHTML = blHTML();
   pushFriends();
+  tasksChanged(true);
 });
 setInterval(() => { if (TGM.TG.status === 'on') { pushFriends(); if (ui.pop === 'together') $$('[data-fclock]', popTogether).forEach((e) => { const m = TGM.TG.members.get(e.dataset.fclock); if (m) e.textContent = statusText(m); }); } }, 1000);
 setInterval(() => { if (TGM.TG.status === 'on') pushPresence(); }, 20_000);
