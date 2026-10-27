@@ -10,6 +10,15 @@ full screen are at the bottom-right. Everything bigger opens in an app window ov
 with topic → chapter → unit → subject progress, three databases (textbooks, slides, your notes),
 calendar, courses and embeds, the Aesthetic studio, and settings.
 
+## The bookshelf (Library → Bookshelf)
+
+A walnut bookcase with your textbooks and the books you read for fun.
+- **Plug and play**: drop a PDF or EPUB onto a shelf (or click the dashed gap). The title, author, page count and cover are read from the file, and a textbook goes under the subject its title mentions.
+- **Shelves**: textbooks stand on the Study shelf, grouped by subject behind divider cards. Make your own shelves for everything else (*New shelf*), click a nameplate to rename or remove one, and drag books between shelves.
+- Books you're partway through stand cover-out on the top ledge. Finished books lie flat in a pile. A red ribbon hangs from anything you're reading.
+- **Reading**: a book opens closed, showing its cover, then the cover lifts and it turns to where you left off. PDFs turn with real page curls (drag a corner, click, swipe or use the arrow keys). EPUBs are laid out across two pages. The page stacks on either side thin out as you read; bookmark a page with the tag button.
+- PDF.js, epub.js and StPageFlip load only when you open or add a book. Books stay on this computer.
+
 ## The study room (Room mode, cube icon)
 
 A 3D isometric study room you can orbit around. Every object is part of the app:
@@ -18,7 +27,7 @@ A 3D isometric study room you can orbit around. Every object is part of the app:
 |---|---|
 | Laptop | Notes |
 | Books with a bookmark | That subject |
-| The shelf | Textbooks & slides |
+| The shelf | Your bookshelf |
 | Wall calendar | Calendar (red dots = due days) |
 | Corkboard | What’s due (your due items are pinned on it) |
 | Wall clock | Starts or pauses your timer (it shows the live countdown) |

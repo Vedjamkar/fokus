@@ -10,6 +10,8 @@ import { VERSION } from './version.js';
 import * as AV from './avatar.js';
 import * as SC from './scenes.js';
 import * as TGM from './together.js';
+import { initLibrary, forgetBook, shelfList } from './library.js';
+import * as GC from './gcal.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -70,9 +72,9 @@ const ICONS = {
 };
 const FILLED = new Set(['play', 'pause', 'next', 'prev', 'skip']);
 const ic = (n, size) => `<svg viewBox="0 0 24 24" aria-hidden="true"${size ? ` width="${size}" height="${size}"` : ''} ${FILLED.has(n) ? 'fill="currentColor" stroke="none"' : 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"'}><path d="${ICONS[n]}"/></svg>`;
-const TYPE_ICON = { textbook: 'book', slides: 'slides', note: 'note' };
-const TYPE_LABEL = { textbook: 'Textbooks', slides: 'Slides', note: 'Notes' };
-const TYPE_ONE = { textbook: 'Textbook', slides: 'Slides', note: 'Note' };
+const TYPE_ICON = { textbook: 'book', slides: 'slides', note: 'note', book: 'book' };
+const TYPE_LABEL = { textbook: 'Textbooks', slides: 'Slides', note: 'Notes', book: 'Books' };
+const TYPE_ONE = { textbook: 'Textbook', slides: 'Slides', note: 'Note', book: 'Book' };
 
 // ---------------------------------------------------------------- backgrounds
 const GRADIENTS = [
@@ -240,14 +242,16 @@ function route() {
   const [name, arg] = h.split('/');
   if (name === 's' && subjectById(arg)) return { name: 'subject', id: arg };
   if (name === 'r' && S.resources.find((r) => r.id === arg)) return { name: 'resource', id: arg };
+  if (name === 'read' && S.resources.find((r) => r.id === arg && r.fileId)) return { name: 'read', id: arg };
   if (name === 'library') return { name: 'library', tab: TYPE_LABEL[arg] ? arg : 'note' };
-  if (['today', 'subjects', 'calendar', 'courses', 'settings', 'studio', 'setup'].includes(name)) return { name };
+  if (['today', 'subjects', 'calendar', 'courses', 'settings', 'studio', 'setup', 'shelf'].includes(name)) return { name };
   return { name: 'stage' };
 }
 function render() {
   const r = route();
   renderStage();
-  if (r.name === 'stage') { sheet.hidden = true; }
+  LIB.syncReader(r);
+  if (r.name === 'stage' || r.name === 'read') { sheet.hidden = true; }
   else {
     sheet.hidden = false;
     $('#sheet-nav').innerHTML = sheetNavHTML(r);
@@ -542,6 +546,7 @@ function sheetNavHTML(r) {
     ${a('#/subjects', 'grid', 'Subjects', r.name === 'subjects')}
     ${S.subjects.map((s) => `<a href="#/s/${s.id}" class="subj-link ${on(r.id === s.id)}"><i class="sub-dot" style="background:${esc(s.color)}"></i><span class="ellip">${esc(s.name)}</span><span class="pct num">${pct(s)}%</span></a>`).join('')}
     <div class="nav-label">Library</div>
+    ${a('#/shelf', 'layers', 'Bookshelf', r.name === 'shelf')}
     ${a('#/library/note', 'note', 'Notes', r.name === 'library' && r.tab === 'note')}
     ${a('#/library/textbook', 'book', 'Textbooks', r.name === 'library' && r.tab === 'textbook')}
     ${a('#/library/slides', 'slides', 'Slides', r.name === 'library' && r.tab === 'slides')}
@@ -672,7 +677,7 @@ function resTableHTML(list, type) {
 }
 function libraryView(r) {
   const list = S.resources.filter((x) => x.type === r.tab && (!ui.libSubject || x.subjectId === ui.libSubject));
-  const blurb = { textbook: 'Your textbooks, with page progress and the PDF right inside.', slides: 'Lecture decks. Upload the PDF or paste a Google Slides link.', note: 'Your own notes, laid out as proper study sheets.' }[r.tab];
+  const blurb = { textbook: 'Your textbooks, with page progress and the PDF right inside.', slides: 'Lecture decks. Upload the PDF or paste a Google Slides link.', note: 'Your own notes, laid out as proper study sheets.', book: 'Books you read for fun. They live on the bookshelf too.' }[r.tab];
   return `<div class="page wide">
     <div class="ph-row"><div class="ph"><h1>${TYPE_LABEL[r.tab]}</h1><p>${blurb}</p></div>
       <select class="input" style="flex:none;width:auto" data-change="lib-subject" aria-label="Filter by subject">${subjOptions(ui.libSubject, 'All subjects')}</select>
@@ -686,10 +691,11 @@ function resourceView(rt) {
   const style = r.style || S.settings.noteStyle;
   const props = `<div class="props">
       <span class="k">${ic('layers')} Database</span><span>${TYPE_ONE[r.type]}</span>
+      ${r.type === 'book' ? `<span class="k">${ic('layers')} Shelf</span><select data-change="r-prop" data-k="shelf" aria-label="Shelf">${shelfList().map((x) => `<option value="${x.id}" ${x.id === (r.shelf || shelfList()[0].id) ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : `
       <span class="k">${ic('book')} Subject</span><select data-change="r-prop" data-k="subjectId" aria-label="Subject">${subjOptions(r.subjectId)}</select>
-      <span class="k">${ic('note')} Chapter</span><select data-change="r-prop" data-k="chapterId" aria-label="Chapter"><option value="">—</option>${chs.map((c) => `<option value="${c.id}" ${c.id === r.chapterId ? 'selected' : ''}>${esc(c.unit.split('·')[0].trim())} · ${esc(c.name)}</option>`).join('')}</select>
+      <span class="k">${ic('note')} Chapter</span><select data-change="r-prop" data-k="chapterId" aria-label="Chapter"><option value="">—</option>${chs.map((c) => `<option value="${c.id}" ${c.id === r.chapterId ? 'selected' : ''}>${esc(c.unit.split('·')[0].trim())} · ${esc(c.name)}</option>`).join('')}</select>`}
       ${r.type !== 'note' ? `
-        ${r.type === 'textbook' ? `<span class="k">${ic('edit')} Author</span><input data-change="r-prop" data-k="author" value="${esc(r.author || '')}" placeholder="Add author" aria-label="Author">` : ''}
+        ${r.type === 'textbook' || r.type === 'book' ? `<span class="k">${ic('edit')} Author</span><input data-change="r-prop" data-k="author" value="${esc(r.author || '')}" placeholder="Add author" aria-label="Author">` : ''}
         <span class="k">${ic('layers')} ${r.type === 'slides' ? 'Slide' : 'Page'}</span><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input type="number" min="0" style="width:80px" data-change="r-prop" data-k="page" value="${r.page || 0}" aria-label="Current page"> of <input type="number" min="0" style="width:90px" data-change="r-prop" data-k="pages" value="${r.pages || 0}" aria-label="Total pages"><span style="flex:1;min-width:120px">${r.pages ? progBar(Math.min(100, Math.round((r.page / r.pages) * 100))) : ''}</span></span>
         <span class="k">${ic('link')} Link</span><input data-change="r-prop" data-k="url" value="${esc(r.url || '')}" placeholder="PDF, Google Slides or Drive link" aria-label="Link">` : ''}
       <span class="k">${ic('clock')} Edited</span><span class="muted">${ago(r.updated)}</span></div>`;
@@ -704,14 +710,15 @@ function resourceView(rt) {
     const linkedNotes = S.resources.filter((x) => x.type === 'note' && x.chapterId && x.chapterId === r.chapterId);
     body = `<div style="display:flex;flex-direction:column;gap:14px"><div id="viewer-slot"></div>
       <label class="drop" data-drop="${r.id}" for="file-${r.id}">${ic('upload')}<span><b>${r.fileId ? 'Replace the PDF' : 'Drop a PDF here'}</b> or click to choose. It stays on this computer.</span>
-        <input type="file" id="file-${r.id}" accept="application/pdf,image/*" data-change="r-file" data-id="${r.id}" hidden></label>
+        <input type="file" id="file-${r.id}" accept="application/pdf,image/*${r.type === 'book' || r.type === 'textbook' ? ',.epub,application/epub+zip' : ''}" data-change="r-file" data-id="${r.id}" hidden></label>
       ${r.fileId ? `<button class="btn ghost" data-act="r-file-del" data-id="${r.id}" style="align-self:flex-start">${ic('trash')} Remove uploaded file</button>` : ''}
       ${linkedNotes.length ? `<h2>Your notes on this chapter</h2><div style="display:flex;gap:8px;flex-wrap:wrap">${linkedNotes.map((n) => `<a class="btn" href="#/r/${n.id}">${ic('note')} ${esc(n.title)}</a>`).join('')}</div>` : ''}</div>`;
   }
   return `<div class="page ${r.type === 'note' && ui.editNote ? 'wide' : ''}">
-    <div class="res-bar"><span class="crumbs"><a href="#/library/${r.type}">${TYPE_LABEL[r.type]}</a> / ${s ? `<a href="#/s/${s.id}">${esc(s.name)}</a> /` : ''}</span>
+    <div class="res-bar"><span class="crumbs"><a href="${r.type === 'book' ? '#/shelf' : `#/library/${r.type}`}">${r.type === 'book' ? 'Bookshelf' : TYPE_LABEL[r.type]}</a> / ${s ? `<a href="#/s/${s.id}">${esc(s.name)}</a> /` : ''}</span>
       ${r.type === 'note' ? `<select class="input" style="flex:none;width:auto" data-change="r-style" aria-label="Paper">${[['ruled', 'Ruled notebook'], ['clean', 'Clean'], ['grid', 'Graph paper'], ['cornell', 'Cornell']].map(([v, l]) => `<option value="${v}" ${v === style ? 'selected' : ''}>${l}</option>`).join('')}</select>
         <button class="btn ${ui.editNote ? '' : 'primary'}" data-act="note-mode">${ui.editNote ? 'Done' : `${ic('edit')} Edit`}</button>` : ''}
+      ${(r.type === 'textbook' || r.type === 'book') && r.fileId && !/\.(png|jpe?g|gif|webp)$/i.test(r.fileName || '') ? `<a class="btn primary" href="#/read/${r.id}">${ic('book')} Read</a>` : ''}
       ${r.type !== 'note' && r.url ? `<a class="btn" href="${esc(r.url)}" target="_blank" rel="noopener">${ic('ext')} Open link</a>` : ''}
       <button class="icon-btn" data-act="res-del" data-id="${r.id}" aria-label="Delete">${ic('trash')}</button></div>
     <div class="sec" style="gap:8px"><input class="title-input" data-change="r-prop" data-k="title" value="${esc(r.title)}" placeholder="Untitled" aria-label="Title">${props}</div>
@@ -725,7 +732,7 @@ async function mountViewer(r) {
   const slot = $('#viewer-slot');
   if (!slot || !r) return;
   let src = '';
-  if (r.fileId) { const blob = await getFile(r.fileId).catch(() => null); if (blob) src = URL.createObjectURL(blob); }
+  if (r.fileId && r.format !== 'epub') { const blob = await getFile(r.fileId).catch(() => null); if (blob) src = URL.createObjectURL(blob); }
   if (!src && r.url) src = embedUrl(r.url);
   slot.innerHTML = src ? `<div class="viewer"><iframe src="${esc(src)}" title="${esc(r.title)}" allow="fullscreen"></iframe></div>${!r.fileId ? '<small class="muted">Blank? That site blocks embedding. Use <b>Open link</b>, or upload the PDF.</small>' : ''}` : '';
 }
@@ -889,7 +896,7 @@ function roomPick(id, data) {
   ({
     laptop: () => go('#/library/note'),
     book: () => go(`#/s/${data.subjectId}`),
-    shelf: () => go('#/library/textbook'),
+    shelf: () => go('#/shelf'),
     calendar: () => go('#/calendar'),
     board: () => openPop('due'),
     tasks: () => openPop('tasks'),
@@ -1107,6 +1114,35 @@ function backdropHTML() {
     <form class="row-input" data-form="room-bg-url" style="padding:0"><input placeholder="…or paste an image, video or YouTube link" aria-label="Backdrop link"><button class="pill">Use</button></form>
   </div>`;
 }
+Object.assign(ACTS_EXTRA, {
+  'ics-export': () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([GC.buildICS(S)], { type: 'text/calendar' }));
+    a.download = `fokus-${todayISO()}.ics`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  },
+  'gcal-sync': async (el) => {
+    const status = $('#gcal-status');
+    el.disabled = true;
+    try {
+      const r = await GC.sync(S, S.settings.gcal, (n, t) => { if (status) status.textContent = `Sending ${n} of ${t}…`; });
+      save();
+      toast(`Synced: ${r.made} added, ${r.updated} updated, ${r.removed} removed`);
+    } catch (e) { save(); toast(e.message || 'Sync failed'); }
+    render();
+  },
+  'gcal-forget': () => confirmBox('Disconnect from Google Calendar? The FOKUS calendar stays in Google; delete it there if you no longer want it.', 'Disconnect', () => {
+    GC.disconnect(); Object.assign(S.settings.gcal, { calendarId: '', map: {}, lastSync: 0 }); save(); render(); toast('Disconnected');
+  }),
+});
+Object.assign(CHANGES_EXTRA, {
+  'gcal-client': (el) => {
+    const v = el.value.trim();
+    if (v !== S.settings.gcal.clientId) { GC.disconnect(); Object.assign(S.settings.gcal, { clientId: v, calendarId: '', map: {}, lastSync: 0 }); }
+    save(); render();
+  },
+});
+
 Object.assign(ACTS_EXTRA, {
   'room-bg': (el) => setRoomBg(JSON.parse(el.dataset.spec)),
   'room-bg-clear': () => setRoomBg(null),
@@ -1672,7 +1708,7 @@ Object.assign(FORMS_EXTRA, {
 const ACCENTS = ['#c2593b', '#d98e2b', '#5f8a4f', '#2f7f86', '#3b5bb5', '#7b4fb0', '#c43f6e', '#2b2a33'];
 function inkFor(hex) { const n = parseInt(hex.slice(1), 16); return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 > 0.62 ? '#111111' : '#ffffff'; }
 function settingsView() {
-  const st = S.settings;
+  const st = S.settings, gc = st.gcal;
   const tab = st.bgSame ? 'home' : ui.bgTab;
   const cur = st.bgSame ? st.bg.home : st.bg[tab];
   const isOn = (spec) => cur && cur.type === spec.type && String(cur.value) === String(spec.value);
@@ -1724,6 +1760,22 @@ function settingsView() {
         <label class="switch"><input type="checkbox" data-change="focus-set" data-k="autoFocus" ${st.focus.autoFocus ? 'checked' : ''}> Start focus automatically</label>
         <label class="switch"><input type="checkbox" data-change="set" data-k="chime" ${st.chime ? 'checked' : ''}> Chime at the end</label></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="chime-test">Test chime</button><button class="btn" data-act="notify-perm">Allow notifications</button></div></div>
+
+    <div class="sec"><h2>Google Calendar</h2>
+      <p class="muted" style="margin:0;max-width:65ch">Sends your deadlines and weekly lectures to a calendar called “FOKUS” in your Google account. It only ever touches that calendar, never your others. Changes in FOKUS carry over each time you sync; edits made in Google don’t come back.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn primary" data-act="gcal-sync">${ic('calendar')} ${gc.calendarId ? 'Sync now' : 'Connect and sync'}</button>
+        <button class="btn" data-act="ics-export">Download .ics file</button>
+        ${gc.calendarId ? '<button class="btn" data-act="gcal-forget">Disconnect</button>' : ''}
+        <small class="muted" id="gcal-status">${gc.lastSync ? `Last synced ${new Date(gc.lastSync).toLocaleString()}` : ''}</small></div>
+      <details class="custom" ${GC.clientIdOf(gc) ? '' : 'open'}><summary>${GC.BUILT_IN_CLIENT_ID ? 'Use your own Google client ID (advanced)' : 'Set up Google sync (once)'} ${ic('down', 18)}</summary><div>
+        <ol class="muted" style="margin:0 0 10px;padding-left:20px;max-width:65ch;line-height:1.6">
+          <li>In <a href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com" target="_blank" rel="noopener">Google Cloud</a>, make a project and enable the <b>Google Calendar API</b>.</li>
+          <li>Under <b>Credentials</b>, create an <b>OAuth client ID</b> of type <i>Web application</i>. Add <code>${esc(location.origin)}</code> as an authorised JavaScript origin.</li>
+          <li>On the consent screen, add yourself as a test user. Paste the client ID below.</li></ol>
+        <label class="field">OAuth client ID<input data-change="gcal-client" value="${esc(gc.clientId)}" placeholder="1234-abc.apps.googleusercontent.com" spellcheck="false"></label>
+        <p class="muted" style="margin:0;max-width:65ch">No setup wanted? Download the .ics file and import it into Google Calendar (Settings → Import &amp; export). It’s a one-time copy.</p>
+      </div></details></div>
 
     <div class="sec"><h2>Your data</h2>
       <p class="muted" style="margin:0;max-width:65ch">Everything is saved in this browser on this computer. Uploaded PDFs and backgrounds stay here too and aren’t part of the backup file.</p>
@@ -2090,7 +2142,7 @@ const ACTS = {
   },
   'res-del': (el) => {
     const r = S.resources.find((x) => x.id === el.dataset.id);
-    confirmBox(`Delete “${r.title || 'Untitled'}”?`, 'Delete', () => { if (r.fileId) delFile(r.fileId).catch(() => {}); S.resources = S.resources.filter((x) => x !== r); location.hash = `#/library/${r.type}`; });
+    confirmBox(`Delete “${r.title || 'Untitled'}”?`, 'Delete', () => { if (r.fileId) delFile(r.fileId).catch(() => {}); forgetBook(r); S.resources = S.resources.filter((x) => x !== r); location.hash = r.type === 'book' ? '#/shelf' : `#/library/${r.type}`; });
   },
   'note-mode': () => { ui.editNote = !ui.editNote; render(); if (ui.editNote) $('#note-src')?.focus(); },
   'note-task': (el) => {
@@ -2213,7 +2265,8 @@ async function uploadFile(r, file) {
   try {
     await putFile(id, file);
     r.fileId = id; r.fileName = file.name; r.updated = Date.now();
-    if (!r.title) r.title = file.name.replace(/\.pdf$/i, '');
+    r.format = /\.epub$/i.test(file.name) ? 'epub' : 'pdf';
+    if (!r.title) r.title = file.name.replace(/\.(pdf|epub)$/i, '');
     save(); render(); toast('File saved on this computer');
   } catch { toast('Couldn’t store the file. The browser may be out of space.'); }
 }
@@ -2275,10 +2328,12 @@ document.addEventListener('toggle', (e) => {
   if (d.tagName !== 'DETAILS' || !d.dataset.id) return;
   if (d.open) { ui.open.add(d.dataset.id); ui.closed.delete(d.dataset.id); } else { ui.closed.add(d.dataset.id); ui.open.delete(d.dataset.id); }
 }, true);
-document.addEventListener('dragover', (e) => { const z = e.target.closest('[data-drop], [data-drop-studio]'); if (z) { e.preventDefault(); z.classList.add('over'); } });
-document.addEventListener('dragleave', (e) => { e.target.closest?.('[data-drop]')?.classList.remove('over'); });
+document.addEventListener('dragover', (e) => { const z = e.target.closest('[data-drop], [data-drop-studio], [data-drop-shelf]'); if (z) { e.preventDefault(); z.classList.add('over'); } });
+document.addEventListener('dragleave', (e) => { e.target.closest?.('[data-drop], [data-drop-shelf]')?.classList.remove('over'); });
 document.addEventListener('drop', (e) => {
   if (e.target.closest('[data-drop-studio]')) { e.preventDefault(); CHANGES['studio-files']({ files: e.dataTransfer.files }); return; }
+  const shelf = e.target.closest('[data-drop-shelf]');
+  if (shelf) { e.preventDefault(); shelf.classList.remove('over'); LIB.dropOnShelf(shelf, e.dataTransfer); return; }
   const z = e.target.closest('[data-drop]');
   if (!z) return;
   e.preventDefault();
@@ -2288,14 +2343,15 @@ document.addEventListener('fullscreenchange', () => { br.innerHTML = brHTML(); }
 view.addEventListener('scroll', () => { const l = $('#sticker-layer', view); if (l) l.style.height = `${view.scrollHeight}px`; }, { passive: true });
 
 // ---------------------------------------------------------------- boot
-Object.assign(ACTS, ACTS_EXTRA, ROOM_ACTS);
-Object.assign(CHANGES, CHANGES_EXTRA);
-const VIEWS = { setup: setupView, studio: studioView, today: todayView, subjects: subjectsView, subject: subjectView, library: libraryView, resource: resourceView, calendar: calendarView, courses: coursesView, settings: settingsView };
+const LIB = initLibrary({ esc, ic, toast, render, openForm, subjOpts });
+Object.assign(ACTS, ACTS_EXTRA, ROOM_ACTS, LIB.ACTS);
+Object.assign(CHANGES, CHANGES_EXTRA, LIB.CHANGES);
+const VIEWS = { setup: setupView, studio: studioView, today: todayView, subjects: subjectsView, subject: subjectView, library: libraryView, shelf: () => LIB.shelfView(), resource: resourceView, calendar: calendarView, courses: coursesView, settings: settingsView };
 // ---------------------------------------------------------------- updates
 // GitHub Pages lets browsers keep files for 10 minutes, so friends could end up on different
 // versions. When version.json online is newer than this copy, re-download every file into the
 // browser cache and reload, so everyone runs the same thing.
-const APP_FILES = ['./', 'index.html', 'styles.css', 'version.json', 'sw.js', ...['app', 'store', 'md', 'player', 'sounds', 'together', 'room', 'visualiser', 'version', 'avatar', 'scenes'].map((f) => `js/${f}.js`)];
+const APP_FILES = ['./', 'index.html', 'styles.css', 'version.json', 'sw.js', ...['app', 'store', 'md', 'player', 'sounds', 'together', 'room', 'visualiser', 'version', 'avatar', 'scenes', 'library'].map((f) => `js/${f}.js`)];
 let updating = false;
 async function checkForUpdate() {
   if (updating || location.hostname === 'localhost') return;

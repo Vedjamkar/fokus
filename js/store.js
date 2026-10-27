@@ -20,6 +20,7 @@ export const DEFAULT_SETTINGS = {
   termStart: addDays(-45), termEnd: addDays(67),
   focus: { work: 25, short: 5, long: 15, every: 4, autoBreak: true, autoFocus: false },
   chime: true,
+  gcal: { clientId: '', calendarId: '', map: {}, lastSync: 0 }, // Google Calendar sync: see gcal.js
   style: 'paper', accentMode: 'auto', // the look: see STYLES in app.js; the accent follows the background unless you pick one
   accent: '', stickers: true, userName: '', clock24: false, dim: 25,
   // background per mode; each is { type: scene | gradient | image | youtube | video | file, value, label?, credit? }
@@ -151,7 +152,7 @@ function load() {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const s = JSON.parse(raw);
-      s.settings = { ...structuredClone(DEFAULT_SETTINGS), ...s.settings, focus: { ...DEFAULT_SETTINGS.focus, ...(s.settings?.focus || {}) }, bg: { ...structuredClone(DEFAULT_SETTINGS.bg), ...(s.settings?.bg || {}) } };
+      s.settings = { ...structuredClone(DEFAULT_SETTINGS), ...s.settings, focus: { ...DEFAULT_SETTINGS.focus, ...(s.settings?.focus || {}) }, gcal: { ...DEFAULT_SETTINGS.gcal, ...(s.settings?.gcal || {}) }, bg: { ...structuredClone(DEFAULT_SETTINGS.bg), ...(s.settings?.bg || {}) } };
       for (const k of ['subjects', 'lectures', 'due', 'resources', 'courses', 'embeds', 'sessions']) s[k] ||= [];
       s.music ||= { saved: [], volume: 60 };
       s.stickers ||= []; s.stickerPack ||= [];
