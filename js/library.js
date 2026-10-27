@@ -66,7 +66,9 @@ function spineHTML(r, opts = {}) {
       <span class="bk-title">${esc(r.title || 'Untitled')}</span>
       ${r.author && w > 30 ? `<span class="bk-auth">${esc(r.author.split(/[ ,]/).filter(Boolean).pop())}</span>` : sub?.code && w > 30 ? `<span class="bk-auth">${esc(sub.code)}</span>` : ''}
       ${r.status === 'done' && r.type === 'book' ? '<span class="bk-star" aria-hidden="true">★</span>' : ''}
+      ${r.marks?.length ? '<i class="bk-slip" aria-hidden="true"></i>' : ''}
     </button>
+    <button class="bk-x" data-act="lib-remove" data-id="${r.id}" aria-label="Remove ${esc(r.title || 'this book')} from the shelf" title="Remove from shelf">${D.ic('x')}</button>
     ${reading ? `<i class="ribbon" style="--rl:${Math.round(18 + p * 26)}px" aria-hidden="true"></i>` : ''}
     <span class="bk-tip">${esc(tip)}</span>
   </div>`;
@@ -78,7 +80,7 @@ function pileHTML(list) {
   return `<div class="slot pile">${list.slice(0, 7).map((r, i) => {
     const t = Math.round(Math.max(16, Math.min(34, 12 + (r.pages || 240) / 26)));
     const len = 120 + pick(r.id, 'len', 40);
-    return `<button class="flat" draggable="true" data-book="${r.id}" data-act="lib-open" data-id="${r.id}" style="--c:${esc(spineColor(r))};--t:${spineInk(r)};--fw:${len}px;--fh:${t}px;--dx:${(pick(r.id, 'dx', 13) - 6) + (i % 2 ? 3 : -3)}px" aria-label="${esc(r.title)} (finished)"><span>${esc(r.title || 'Untitled')}</span></button>`;
+    return `<span class="flat-w"><button class="flat" draggable="true" data-book="${r.id}" data-act="lib-open" data-id="${r.id}" style="--c:${esc(spineColor(r))};--t:${spineInk(r)};--fw:${len}px;--fh:${t}px;--dx:${(pick(r.id, 'dx', 13) - 6) + (i % 2 ? 3 : -3)}px" aria-label="${esc(r.title)} (finished)"><span>${esc(r.title || 'Untitled')}</span></button><button class="bk-x" data-act="lib-remove" data-id="${r.id}" aria-label="Remove ${esc(r.title || 'this book')} from the shelf" title="Remove from shelf">${D.ic('x')}</button></span>`;
   }).reverse().join('')}</div>`;
 }
 const addSlot = (where, label) => `<label class="slot add" style="--h:168px;--w:46px" title="${label}">
@@ -88,7 +90,7 @@ const addSlot = (where, label) => `<label class="slot add" style="--h:168px;--w:
 // a cover: the real one from the file, or a cloth-bound one set in type
 function coverFace(r, url) {
   const { esc } = D;
-  if (url && !r.plainCover) return `<img src="${esc(url)}" alt="">`;
+  if (url && r.showCover !== false) return `<img src="${esc(url)}" alt="">`; // the book's own cover unless you chose cloth
   const orn = ['❦', '✦', '◆', '❧'][pick(r.id, 'orn', 4)];
   return `<span class="gen-cover" style="--c:${esc(spineColor(r))};--t:${spineInk(r)}"><b>${esc(r.title || 'Untitled')}</b><i>${orn}</i>${r.author ? `<small>${esc(r.author)}</small>` : ''}</span>`;
 }
@@ -138,7 +140,7 @@ async function hydrateCovers() {
   for (const el of document.querySelectorAll('[data-cover]')) {
     const r = S.resources.find((x) => x.id === el.dataset.cover);
     if (!r || el.querySelector('img')) continue;
-    if ((!r.cover || (r.plainCover === undefined && fmtOf(r) === 'pdf')) && r.fileId) { makeCover(r).then(() => { if (r.cover) hydrateCovers(); }); continue; }
+    if (!r.cover && r.fileId) { makeCover(r).then(() => { if (r.cover) hydrateCovers(); }); continue; }
     const u = await coverUrl(r);
     if (u) el.innerHTML = coverFace(r, u);
   }
@@ -206,17 +208,7 @@ async function makeCover(r) {
 }
 async function coverFromPdf(r, pdf) {
   const c = await renderPage(pdf, 1, 420);
-  // a first page that's mostly white paper is a title page, not cover art: such books get a cloth cover
-  r.plainCover = paperish(c);
   await storeCover(r, await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.85)));
-}
-function paperish(c) {
-  const s = document.createElement('canvas'); s.width = 40; s.height = 56;
-  const x = s.getContext('2d'); x.drawImage(c, 0, 0, 40, 56);
-  const d = x.getImageData(0, 0, 40, 56).data;
-  let light = 0;
-  for (let i = 0; i < d.length; i += 4) if (d[i] > 225 && d[i + 1] > 225 && d[i + 2] > 225) light++;
-  return light / (d.length / 4) > 0.8;
 }
 async function coverFromEpub(r, book) {
   const u = await book.coverUrl().catch(() => null);
@@ -302,6 +294,7 @@ async function openReader(r) {
   h.innerHTML = `<div class="rd-top">
       <a class="rd-btn" href="#/shelf" aria-label="Back to the shelf">${ic('left')}<span>Shelf</span></a>
       <div class="rd-title"><b>${esc(r.title || 'Untitled')}</b><small>${esc(r.author || (r.type === 'textbook' ? subjectById(r.subjectId)?.name || 'Textbook' : 'Leisure'))}</small></div>
+      <button class="rd-btn" data-act="rd-cover" aria-label="Switch between the book's own cover and a cloth cover" title="Cover: the book's own or cloth">${ic('image')}</button>
       <button class="rd-btn" data-act="rd-mark" aria-label="Bookmark this page" id="rd-mark">${ic('tag')}</button>
       <a class="rd-btn" href="#/r/${r.id}" aria-label="Details">${ic('more')}</a>
     </div>
@@ -312,7 +305,8 @@ async function openReader(r) {
         <div class="paper-pages"><div class="leaf-page left"></div><div class="leaf-page right"></div></div>
         <div class="epub-host" id="epub-host"></div>
         <div class="gutter"></div>
-        <i class="rd-ribbon" id="rd-ribbon" hidden></i>
+        <div class="bm-tabs" id="bm-tabs"></div>
+        <button class="bm" id="bm" data-act="rd-mark" aria-label="Remove this bookmark" title="Remove bookmark" hidden><i class="bm-tassel"></i><span>✦</span></button>
       </div>
       <button class="rd-arrow prev" data-act="rd-turn" data-d="-1" aria-label="Previous page">${ic('left')}</button>
       <button class="rd-arrow next" data-act="rd-turn" data-d="1" aria-label="Next page">${ic('chev')}</button>
@@ -370,7 +364,7 @@ async function openPdf(r, blob) {
   const first = (await R.pdf.getPage(1)).getViewport({ scale: 1 });
   R.aspect = first.width / first.height;
   if (r.pages !== R.pdf.numPages) { r.pages = R.pdf.numPages; save(); }
-  if (!r.cover || r.plainCover === undefined) {
+  if (!r.cover) {
     coverFromPdf(r, R.pdf).then(() => {
       save();
       const f = R.pages?.[0]?.querySelector('.board-face');
@@ -383,7 +377,9 @@ async function openPdf(r, blob) {
 // The flip book is a real book: front board, endpaper, the PDF's pages, (a blank to even it out),
 // endpaper, back board. Index 0 is the closed front cover; PDF page k sits at index k + 1.
 const FRONT = 2; // board + endpaper before page 1
-const toIndex = (page) => page + FRONT - 1;
+// When the book shows its own cover, that cover is PDF page 1, so page 1 is the front board and
+// the pages inside start at page 2 (otherwise the cover would appear twice).
+const toIndex = (page) => Math.max(page, 1 + (R.skip || 0)) - (R.skip || 0) + FRONT - 1;
 function buildFlip(start, opening = false) {
   const stage = $id('flip-stage');
   if (!stage || !R.pdf) return;
@@ -399,11 +395,12 @@ function buildFlip(start, opening = false) {
   const page = (cls, html, hard) => { const p = document.createElement('div'); p.className = `pf-page ${cls}`; p.dataset.density = hard ? 'hard' : 'soft'; p.innerHTML = html; el.append(p); return p; };
   const cloth = `style="--c:${esc(spineColor(r))};--t:${spineInk(r)}"`;
   const pages = [page('board front', `<span class="board-face" ${cloth}>${coverFace(r, coverUrls.get(r.id))}</span>`, true), page('endpaper', '', false)];
+  R.skip = r.showCover !== false && N > 1 ? 1 : 0;
   R.pdfEl = [];
-  for (let k = 0; k < N; k++) {
+  for (let k = R.skip; k < N; k++) {
     const p = page('', `<img alt="Page ${k + 1}" draggable="false">${R.urls.has(k) ? '' : '<span class="pf-wait"></span>'}`, false);
     if (R.urls.has(k)) p.firstChild.src = R.urls.get(k);
-    R.pdfEl.push(p); pages.push(p);
+    R.pdfEl[k] = p; pages.push(p);
   }
   // the back board has to land alone on the left, so the page count before it must be odd
   if ((pages.length + 1) % 2) pages.push(page('blank', '', false));
@@ -445,13 +442,13 @@ async function openSlowly() {
 }
 let drawQ = Promise.resolve();
 function drawAround(i) {
-  const k0 = i - FRONT;
-  const want = [0, 1, -1, 2, 3, -2, 4, 5].map((d) => k0 + d).filter((k) => k >= 0 && k < (R.pdfEl?.length || 0) && !R.urls.has(k));
+  const k0 = i - FRONT + R.skip;
+  const want = [0, 1, -1, 2, 3, -2, 4, 5].map((d) => k0 + d).filter((k) => k >= R.skip && k < (R.pdfEl?.length || 0) && !R.urls.has(k));
   for (const k of want) {
     drawQ = drawQ.then(async () => {
       if (!R.pdf || R.urls.has(k)) return;
       // you've moved on: skip it, it'll be drawn when you come back
-      const here = (R.flip?.getCurrentPageIndex() ?? 0) - FRONT;
+      const here = (R.flip?.getCurrentPageIndex() ?? 0) - FRONT + R.skip;
       if (Math.abs(k - here) > 7 && Math.abs(k - (R.r.page || 1) + 1) > 7) return;
       const { ph } = layout();
       const c = await renderPage(R.pdf, k + 1, Math.min(2600, ph * Math.min(2, window.devicePixelRatio || 1)));
@@ -475,7 +472,7 @@ function onPage(i) {
   drawAround(Math.max(i, FRONT));
   if (i === 0) return; // closed: keep the place you were at
   const right = portrait ? i : i + 1;
-  setPos(Math.max(1, Math.min(N, right - FRONT + 1)));
+  setPos(Math.max(1, Math.min(N, right - FRONT + 1 + R.skip)));
 }
 function setPos(page) {
   const r = R.r; if (!r) return;
@@ -486,9 +483,19 @@ function setPos(page) {
   if (pos) pos.textContent = R.kind === 'pdf' ? `${page} of ${r.pages}` : `${page}%`;
   if (scrub && document.activeElement !== scrub) scrub.value = page;
   $id('book-open')?.style.setProperty('--read', prog(r).toFixed(3));
-  const marked = (r.marks || []).includes(page);
-  $id('rd-ribbon')?.toggleAttribute('hidden', !marked);
+  const marks = (r.marks || []).sort((x, y) => x - y);
+  const left = R.single || R.kind !== 'pdf' ? page : page - 1; // the spread shows left…page
+  const marked = marks.some((m) => m >= left && m <= page);
+  $id('bm')?.toggleAttribute('hidden', !marked);
   $id('rd-mark')?.classList.toggle('on', marked);
+  // the others stick out of the top of the page block: behind you on the left, ahead on the right
+  const tabs = $id('bm-tabs'), total = r.pages || 1;
+  if (tabs) tabs.innerHTML = marks.filter((m) => m < left || m > page).map((m, i) => {
+    const before = m < left;
+    const f = before ? m / Math.max(1, left) : (m - page) / Math.max(1, total - page);
+    const x = R.single ? (before ? 4 + f * 40 : 54 + f * 40) : (before ? 4 + f * 40 : 56 + f * 40);
+    return `<button class="bm-tab" data-act="rd-go" data-p="${m}" style="--x:${x.toFixed(1)}%;--k:${i % 3}" title="${R.kind === 'pdf' ? `Page ${m}` : `${m}%`}" aria-label="Go to bookmark at ${R.kind === 'pdf' ? `page ${m}` : `${m}%`}"></button>`;
+  }).join('');
   const mk = $id('rd-marks');
   if (mk) mk.innerHTML = (r.marks || []).sort((x, y) => x - y).map((m) => `<button class="mark" data-act="rd-go" data-p="${m}" style="--at:${r.pages ? (m / r.pages) * 100 : 0}%" aria-label="Bookmark at ${m}"></button>`).join('');
 }
@@ -579,10 +586,22 @@ const ACTS = {
   'rd-mark': () => {
     const r = R.r; if (!r) return;
     r.marks ||= [];
-    const i = r.marks.indexOf(r.page);
-    if (i >= 0) r.marks.splice(i, 1); else r.marks.push(r.page);
+    const left = R.single || R.kind !== 'pdf' ? r.page : r.page - 1;
+    const here = r.marks.filter((m) => m >= left && m <= r.page);
+    if (here.length) r.marks = r.marks.filter((m) => !here.includes(m)); else r.marks.push(r.page);
     save(); setPos(r.page);
-    D.toast(i >= 0 ? 'Bookmark removed' : 'Bookmarked');
+    D.toast(here.length ? 'Bookmark taken out' : 'Bookmark slipped in');
+  },
+  'rd-cover': () => { const r = R.r; if (r) setCover(r, r.showCover === false); },
+  // off the shelf: gone straight away, with a few seconds to undo before the file is deleted
+  'lib-remove': (el) => {
+    const r = S.resources.find((x) => x.id === el.dataset.id);
+    if (!r) return;
+    const at = S.resources.indexOf(r);
+    S.resources.splice(at, 1); save(); D.render();
+    let undone = false;
+    D.toast(`Removed “${r.title || 'Untitled'}”`, () => { undone = true; S.resources.splice(Math.min(at, S.resources.length), 0, r); });
+    setTimeout(() => { if (!undone && !S.resources.includes(r)) { if (r.fileId) delFile(r.fileId).catch(() => {}); forgetBook(r); } }, 6500);
   },
   'shelf-new': () => D.openForm('New shelf', [{ k: 'name', label: 'Name', required: true, placeholder: 'e.g. Sci-fi, Poetry, To read next' }], (v) => {
     shelfList().push({ id: uid(), name: v.name });
@@ -600,7 +619,20 @@ const ACTS = {
     });
   },
 };
+// show the book's own cover (PDF first page, EPUB cover image) or a cloth one, everywhere at once
+async function setCover(r, own) {
+  r.showCover = own; save();
+  if (own && !r.cover && r.fileId) await makeCover(r);
+  const html = coverFace(r, await coverUrl(r));
+  document.querySelectorAll(`[data-cover="${r.id}"]`).forEach((el) => { el.innerHTML = html; });
+  const board = R.r === r && (R.pages?.[0]?.querySelector('.board-face') || document.querySelector('.epub-cover .board-face'));
+  if (board) board.innerHTML = html;
+  // page 1 moves between the front board and the inside, so lay the book out again at the same page
+  if (R.r === r && R.pdf) { R.skip = own && R.pdf.numPages > 1 ? 1 : 0; buildFlip(toIndex(r.page || 1)); }
+  D.toast(own ? (r.cover ? 'Showing the book’s own cover' : 'This file has no cover image, so it keeps a cloth one') : 'Showing a cloth cover');
+}
 const CHANGES = {
+  'lib-cover': (el) => { const r = S.resources.find((x) => x.id === el.dataset.id); if (r) setCover(r, el.value === 'own'); },
   'lib-file': (el) => { [...el.files].forEach((f) => addFile(f, el.dataset.where)); el.value = ''; },
   'rd-scrub': (el) => goTo(+el.value),
 };
