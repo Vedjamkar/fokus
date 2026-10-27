@@ -275,8 +275,22 @@ export function syncReader(rt) {
   closeReader();
   if (want) openReader(S.resources.find((x) => x.id === want));
 }
+// Reading fills the screen: phones go fullscreen when a book opens, and leave it with the book.
+let fullForReading = false;
+const isFull = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+function enterFull() {
+  const el = document.documentElement, go = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (!go || isFull()) return;
+  try { Promise.resolve(go.call(el, { navigationUI: 'hide' })).then(() => { fullForReading = true; }).catch(() => {}); } catch {}
+}
+function leaveFull() {
+  const go = document.exitFullscreen || document.webkitExitFullscreen;
+  if (isFull() && go) Promise.resolve(go.call(document)).catch(() => {});
+}
+document.addEventListener('fullscreenchange', () => { document.getElementById('rd-full')?.classList.toggle('on', isFull()); });
 function closeReader() {
   if (!R.id) return;
+  if (fullForReading) { fullForReading = false; leaveFull(); }
   flush();
   try { R.flip?.destroy(); } catch {}
   R.pdf?.destroy(); R.epub?.destroy();
@@ -294,6 +308,7 @@ async function openReader(r) {
   h.innerHTML = `<div class="rd-top">
       <a class="rd-btn" href="#/shelf" aria-label="Back to the shelf">${ic('left')}<span>Shelf</span></a>
       <div class="rd-title"><b>${esc(r.title || 'Untitled')}</b><small>${esc(r.author || (r.type === 'textbook' ? subjectById(r.subjectId)?.name || 'Textbook' : 'Leisure'))}</small></div>
+      <button class="rd-btn" data-act="rd-full" id="rd-full" aria-label="Full screen" title="Full screen">${ic('expand')}</button>
       <button class="rd-btn" data-act="rd-cover" aria-label="Switch between the book's own cover and a cloth cover" title="Cover: the book's own or cloth">${ic('image')}</button>
       <button class="rd-btn" data-act="rd-mark" aria-label="Bookmark this page" id="rd-mark">${ic('tag')}</button>
       <a class="rd-btn" href="#/r/${r.id}" aria-label="Details">${ic('more')}</a>
@@ -333,7 +348,7 @@ function layout() {
   const desk = $id('rd-desk'), bk = $id('book-open');
   if (!desk || !bk) return { pw: 300, ph: 420 };
   const narrow = desk.clientWidth < 760;
-  const W = desk.clientWidth - (narrow ? 56 : 180), H = desk.clientHeight - (narrow ? 40 : 64);
+  const W = desk.clientWidth - (narrow ? 36 : 180), H = desk.clientHeight - (narrow ? 36 : 64);
   R.single = narrow || W / H < 1.05;
   const n = R.single ? 1 : 2;
   let ph = H, pw = ph * R.aspect;
@@ -438,7 +453,8 @@ async function openSlowly() {
   set.flippingTime = 800;
   if (R.flip !== f) return;
   const now = f.getCurrentPageIndex();
-  if (target > now + 1) { $id('book-open')?.classList.add('riffle'); f.turnToPage(target); setTimeout(() => $id('book-open')?.classList.remove('riffle'), 500); }
+  const portrait = f.getOrientation() === 'portrait';
+  if (portrait ? target !== now : target > now + 1) { $id('book-open')?.classList.add('riffle'); f.turnToPage(target); setTimeout(() => $id('book-open')?.classList.remove('riffle'), 500); }
 }
 let drawQ = Promise.resolve();
 function drawAround(i) {
@@ -579,9 +595,12 @@ const ACTS = {
     // a link-only textbook (or an image upload) opens its page, where a PDF can be added
     if (!r.fileId || /\.(png|jpe?g|gif|webp)$/i.test(r.fileName || '')) { location.hash = `#/r/${r.id}`; return; }
     el.classList.add('pulled');
+    // still inside the tap, which browsers require before going fullscreen
+    if (matchMedia('(max-width: 760px), (pointer: coarse)').matches) enterFull();
     setTimeout(() => { location.hash = `#/read/${r.id}`; }, calm() ? 0 : 280);
   },
   'rd-turn': (el) => turn(+el.dataset.d),
+  'rd-full': () => { if (isFull()) { fullForReading = false; leaveFull(); } else { enterFull(); } },
   'rd-go': (el) => goTo(+el.dataset.p),
   'rd-mark': () => {
     const r = R.r; if (!r) return;

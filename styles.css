@@ -999,12 +999,17 @@ body.in-room.room-bg .bg-photo { filter: none; transform: none; }
   .case .crown { margin: 0 -18px; } .case .plinth { margin: 0 -14px; }
   .bay { padding: 0 8px; }
   .ledge { padding: 0 10px var(--plank); }
-  .face { width: 100px; } .plant { display: none; }
+  .face { width: 92px; } .face-meta { max-width: 92px; } .plant { display: none; }
+  /* the cover-out ledge swipes sideways on a phone */
+  .ledge-row { overflow-x: auto; scroll-snap-type: x mandatory; gap: 16px; scrollbar-width: none; padding-right: 10px; }
+  .ledge-row::-webkit-scrollbar { display: none; }
+  .face { scroll-snap-align: start; }
   .bk-tip { display: none; }
 }
 
 /* ---------- reader: an open book on a desk ---------- */
-.reader { position: fixed; inset: 0; z-index: 25; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; color: #f3e9d6; animation: fade .25s ease; overflow: hidden;
+/* the column is pinned to the screen: the book is sized from the desk, so it must never widen it */
+.reader { position: fixed; inset: 0; z-index: 25; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; color: #f3e9d6; animation: fade .25s ease; overflow: hidden;
   background: radial-gradient(70% 60% at 50% 42%, rgba(255, 212, 150, .16), transparent 72%), repeating-linear-gradient(92deg, rgba(255, 255, 255, .02) 0 3px, rgba(0, 0, 0, .05) 3px 9px, transparent 9px 17px), linear-gradient(180deg, #23160d, #2f1e12 50%, #1c120b); }
 .rd-top { display: flex; align-items: center; gap: 12px; padding: calc(12px + env(safe-area-inset-top, 0px)) 18px 6px; }
 .rd-btn { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; border: 0; border-radius: 10px; background: rgba(255, 255, 255, .06); color: inherit; text-decoration: none; cursor: pointer; font-weight: 600; font-size: 14px; }
