@@ -121,6 +121,7 @@ function shelfView() {
   setTimeout(hydrateCovers, 0);
   return `<div class="page wide shelf-page">
     <div class="ph-row"><div class="ph"><h1>Bookshelf</h1><p>Drop a PDF or EPUB on a shelf and it’s ready to read. Drag books between shelves to sort them.</p></div>
+      <button class="btn primary" data-act="imp-open">${ic('upload')} Import</button>
       <button class="btn" data-act="shelf-new">${ic('plus')} New shelf</button>
       <button class="btn" data-act="res-new" data-type="textbook">${ic('link')} Textbook from a link</button></div>
     <div class="case">
@@ -243,6 +244,17 @@ document.addEventListener('dragstart', (e) => {
   e.dataTransfer.effectAllowed = 'move';
   b.classList.add('lifted');
 });
+// touch screens have no hover: press and hold a book to show its remove button
+let holdT = 0, held = false;
+document.addEventListener('pointerdown', (e) => {
+  const b = e.target.closest?.('[data-book]');
+  document.querySelectorAll('.armed').forEach((x) => { if (!x.contains(e.target)) x.classList.remove('armed'); });
+  if (!b || e.pointerType === 'mouse') return;
+  clearTimeout(holdT);
+  holdT = setTimeout(() => { held = true; b.closest('.slot, .flat-w')?.classList.add('armed'); navigator.vibrate?.(12); }, 480);
+});
+['pointerup', 'pointercancel', 'pointermove'].forEach((t) => document.addEventListener(t, (e) => { if (t !== 'pointermove' || Math.abs(e.movementX) + Math.abs(e.movementY) > 6) clearTimeout(holdT); }));
+document.addEventListener('contextmenu', (e) => { if (e.target.closest?.('[data-book]') && held) e.preventDefault(); });
 document.addEventListener('dragend', (e) => { e.target.closest?.('[data-book]')?.classList.remove('lifted'); document.querySelectorAll('[data-drop-shelf].over').forEach((z) => z.classList.remove('over')); });
 
 // ---------------------------------------------------------------- lazy libraries
@@ -295,7 +307,7 @@ function closeReader() {
   try { R.flip?.destroy(); } catch {}
   R.pdf?.destroy(); R.epub?.destroy();
   R.urls.forEach((u) => URL.revokeObjectURL(u));
-  Object.assign(R, { id: null, r: null, pdf: null, flip: null, pages: [], urls: new Map(), epub: null, rendition: null });
+  Object.assign(R, { id: null, r: null, pdf: null, flip: null, solo: false, pages: [], urls: new Map(), epub: null, rendition: null });
   const h = host(); h.hidden = true; h.innerHTML = '';
   window.removeEventListener('resize', onResize);
 }
@@ -348,7 +360,8 @@ function layout() {
   const desk = $id('rd-desk'), bk = $id('book-open');
   if (!desk || !bk) return { pw: 300, ph: 420 };
   const narrow = desk.clientWidth < 760;
-  const W = desk.clientWidth - (narrow ? 36 : 180), H = desk.clientHeight - (narrow ? 36 : 64);
+  const touch = matchMedia('(pointer: coarse)').matches;
+  const W = desk.clientWidth - (narrow ? 36 : touch ? 64 : 180), H = desk.clientHeight - (narrow ? 36 : 56);
   R.single = narrow || W / H < 1.05;
   const n = R.single ? 1 : 2;
   let ph = H, pw = ph * R.aspect;
@@ -365,7 +378,9 @@ function onResize() {
   resizeT = setTimeout(() => {
     const was = R.single;
     layout();
-    if (R.pdf) buildFlip(R.flip?.getCurrentPageIndex() || 0);
+    // rotating a tablet swaps one page for two: rebuild at the same page, not the same slot
+    // relaying out isn't reading: keep your saved page exactly as it was
+    if (R.pdf) { R.opening = true; layBook(R.r.page || 1); setTimeout(() => { R.opening = false; }, 400); }
     else if (R.rendition) { if (was !== R.single) R.rendition.spread(R.single ? 'none' : 'always'); R.rendition.resize(); }
   }, 180);
 }
@@ -387,15 +402,23 @@ async function openPdf(r, blob) {
     }).catch((e) => console.warn('cover', e));
   }
   $id('rd-scrub').max = r.pages;
-  buildFlip(0, true);
+  R.opening = true;
+  const lid = await shutCover(r);
+  layBook(Math.max(1, r.page || 1));
+  liftCover(lid).finally(() => { R.opening = false; if (R.solo) showSolo(R.soloPage); else if (R.flip) onPage(R.flip.getCurrentPageIndex()); });
 }
 // The flip book is a real book: front board, endpaper, the PDF's pages, (a blank to even it out),
-// endpaper, back board. Index 0 is the closed front cover; PDF page k sits at index k + 1.
-const FRONT = 2; // board + endpaper before page 1
+// endpaper, back board. Index 0 is the closed front cover. On a single page (phones, tablets held
+// upright) there are no endpapers and the covers are soft, so a turn always lands on a real page:
+// StPageFlip's single-page mode doesn't handle rigid boards well.
+const front = () => (R.single ? 1 : 2); // pages before the first PDF page
 // When the book shows its own cover, that cover is PDF page 1, so page 1 is the front board and
 // the pages inside start at page 2 (otherwise the cover would appear twice).
-const toIndex = (page) => Math.max(page, 1 + (R.skip || 0)) - (R.skip || 0) + FRONT - 1;
-function buildFlip(start, opening = false) {
+const toIndex = (page) => Math.max(page, 1 + (R.skip || 0)) - (R.skip || 0) + front() - 1;
+// one page at a time (phones, tablets upright) or a two-page spread
+function layBook(page) { layout(); if (R.single) buildSolo(page); else buildFlip(toIndex(page)); }
+function buildFlip(start) {
+  R.solo = false;
   const stage = $id('flip-stage');
   if (!stage || !R.pdf) return;
   try { R.flip?.destroy(); } catch {}
@@ -409,7 +432,9 @@ function buildFlip(start, opening = false) {
   stage.replaceChildren(el);
   const page = (cls, html, hard) => { const p = document.createElement('div'); p.className = `pf-page ${cls}`; p.dataset.density = hard ? 'hard' : 'soft'; p.innerHTML = html; el.append(p); return p; };
   const cloth = `style="--c:${esc(spineColor(r))};--t:${spineInk(r)}"`;
-  const pages = [page('board front', `<span class="board-face" ${cloth}>${coverFace(r, coverUrls.get(r.id))}</span>`, true), page('endpaper', '', false)];
+  const hard = !R.single;
+  const pages = [page('board front', `<span class="board-face" ${cloth}>${coverFace(r, coverUrls.get(r.id))}</span>`, hard)];
+  if (!R.single) pages.push(page('endpaper', '', false));
   R.skip = r.showCover !== false && N > 1 ? 1 : 0;
   R.pdfEl = [];
   for (let k = R.skip; k < N; k++) {
@@ -417,10 +442,12 @@ function buildFlip(start, opening = false) {
     if (R.urls.has(k)) p.firstChild.src = R.urls.get(k);
     R.pdfEl[k] = p; pages.push(p);
   }
-  // the back board has to land alone on the left, so the page count before it must be odd
-  if ((pages.length + 1) % 2) pages.push(page('blank', '', false));
-  pages.push(page('endpaper', '', false));
-  pages.push(page('board back', `<span class="board-face" ${cloth}></span>`, true));
+  if (!R.single) {
+    // the back board has to land alone on the left, so the page count before it must be odd
+    if ((pages.length + 1) % 2) pages.push(page('blank', '', false));
+    pages.push(page('endpaper', '', false));
+  }
+  pages.push(page('board back', `<span class="board-face" ${cloth}></span>`, hard));
   R.pages = pages;
   if (!coverUrls.get(r.id) && r.cover) coverUrl(r).then((u) => { const f = pages[0].querySelector('.board-face'); if (u && f) f.innerHTML = coverFace(r, u); });
   R.flip = new R.PageFlip(el, {
@@ -428,7 +455,7 @@ function buildFlip(start, opening = false) {
     autoSize: false, showCover: true, usePortrait: true, startPage: Math.min(start, pages.length - 1),
     flippingTime: 800, maxShadowOpacity: 0.5, drawShadow: true, showPageCorners: true, mobileScrollSupport: false, swipeDistance: 24,
   });
-  R.flip.on('init', (e) => { onPage(e.data.page); $id('book-open')?.classList.add('ready'); if (opening) openSlowly(); });
+  R.flip.on('init', (e) => { onPage(e.data.page); $id('book-open')?.classList.add('ready'); });
   R.flip.on('flip', (e) => onPage(e.data));
   R.flip.on('changeState', (e) => {
     const bk = $id('book-open'), moving = e.data === 'flipping' || e.data === 'user_fold';
@@ -437,34 +464,40 @@ function buildFlip(start, opening = false) {
   });
   R.flip.loadFromHTML(pages);
 }
-// The book rests closed for a moment, the cover lifts slowly, then it turns to where you left off.
-async function openSlowly() {
-  const f = R.flip, r = R.r;
-  if (!f) return;
-  const target = toIndex(Math.max(1, r.page || 1));
-  if (calm()) { f.turnToPage(target); return; }
-  drawAround(target); // ready by the time the cover is open
+const wait = (ms) => new Promise((res) => setTimeout(res, ms));
+// Opening, for PDFs and EPUBs alike: the book lies closed with its cover on top, already open
+// underneath at your page. After a moment the cover swings open around the spine. The cover is
+// its own element, not a page of the flip book, so the opening never depends on page maths.
+async function shutCover(r) {
+  const bk = $id('book-open');
+  if (!bk) return null;
+  bk.querySelector('.cover-lid')?.remove();
+  const lid = document.createElement('div');
+  lid.className = 'cover-lid';
+  lid.innerHTML = `<span class="board-face" style="--c:${D.esc(spineColor(r))};--t:${spineInk(r)}">${coverFace(r, await coverUrl(r))}</span><span class="endpaper"></span>`;
+  bk.append(lid);
+  bk.classList.add('shut');
+  return lid;
+}
+async function liftCover(lid) {
+  const bk = $id('book-open');
+  if (!lid || !bk) return;
+  if (calm()) { lid.remove(); bk.classList.remove('shut'); return; }
   await wait(900);
-  if (R.flip !== f) return;
-  const set = f.getSettings();
-  set.flippingTime = 1700;
-  f.flipNext('bottom');
-  await wait(1800);
-  set.flippingTime = 800;
-  if (R.flip !== f) return;
-  const now = f.getCurrentPageIndex();
-  const portrait = f.getOrientation() === 'portrait';
-  if (portrait ? target !== now : target > now + 1) { $id('book-open')?.classList.add('riffle'); f.turnToPage(target); setTimeout(() => $id('book-open')?.classList.remove('riffle'), 500); }
+  bk.classList.remove('shut');
+  lid.classList.add('open');
+  await wait(1750);
+  lid.remove();
 }
 let drawQ = Promise.resolve();
 function drawAround(i) {
-  const k0 = i - FRONT + R.skip;
-  const want = [0, 1, -1, 2, 3, -2, 4, 5].map((d) => k0 + d).filter((k) => k >= R.skip && k < (R.pdfEl?.length || 0) && !R.urls.has(k));
+  const k0 = i - front() + R.skip;
+  const want = [0, 1, -1, 2, 3, -2, 4, 5].map((d) => k0 + d).filter((k) => k >= R.skip && k < R.pdf.numPages && !R.urls.has(k));
   for (const k of want) {
     drawQ = drawQ.then(async () => {
       if (!R.pdf || R.urls.has(k)) return;
       // you've moved on: skip it, it'll be drawn when you come back
-      const here = (R.flip?.getCurrentPageIndex() ?? 0) - FRONT + R.skip;
+      const here = R.solo ? R.soloPage - 1 : (R.flip?.getCurrentPageIndex() ?? 0) - front() + R.skip;
       if (Math.abs(k - here) > 7 && Math.abs(k - (R.r.page || 1) + 1) > 7) return;
       const { ph } = layout();
       const c = await renderPage(R.pdf, k + 1, Math.min(2600, ph * Math.min(2, window.devicePixelRatio || 1)));
@@ -474,6 +507,7 @@ function drawAround(i) {
       R.urls.set(k, u);
       const pg = R.pdfEl[k];
       if (pg) { pg.querySelector('img').src = u; pg.querySelector('.pf-wait')?.remove(); }
+      if (R.solo && k === R.soloPage - 1) paintSolo($id('solo-page'), R.soloPage);
     }).catch(() => {});
   }
 }
@@ -485,10 +519,10 @@ function onPage(i) {
   bk?.classList.toggle('closed', i === 0);
   bk?.classList.toggle('closed-back', i >= n - 1);
   bk?.classList.toggle('portrait', portrait);
-  drawAround(Math.max(i, FRONT));
-  if (i === 0) return; // closed: keep the place you were at
+  drawAround(Math.max(i, front()));
+  if (i === 0 || R.opening) return; // closed or still opening: keep the place you were at
   const right = portrait ? i : i + 1;
-  setPos(Math.max(1, Math.min(N, right - FRONT + 1 + R.skip)));
+  setPos(Math.max(1, Math.min(N, right - front() + 1 + R.skip)));
 }
 function setPos(page) {
   const r = R.r; if (!r) return;
@@ -534,22 +568,63 @@ async function openEpub(r, blob) {
   R.rendition.on('keyup', onKey);
   $id('rd-scrub').max = 100;
   r.pages = 100;
-  // closed first: the front board over the text, then it swings open
-  const bk = $id('book-open');
-  const cover = document.createElement('div');
-  cover.className = 'epub-cover';
-  cover.innerHTML = `<span class="board-face" style="--c:${D.esc(spineColor(r))};--t:${spineInk(r)}">${coverFace(r, await coverUrl(r))}</span><span class="endpaper"></span>`;
-  bk.append(cover);
-  bk.classList.add('closed');
+  const lid = await shutCover(r);
   await R.rendition.display(r.loc || undefined);
-  bk.classList.add('ready');
-  if (calm()) cover.remove(), bk.classList.remove('closed');
-  else wait(900).then(() => { bk.classList.remove('closed'); cover.classList.add('open'); return wait(1750); }).then(() => cover.remove());
+  $id('book-open')?.classList.add('ready');
+  liftCover(lid);
   if (!r.cover) coverFromEpub(r, R.epub).then(save).catch(() => {});
   R.epub.ready.then(() => R.epub.locations.generate(1200)).then(() => { if (R.rendition?.location) setPos(Math.round(R.epub.locations.percentageFromCfi(R.rendition.location.start.cfi) * 100)); }).catch(() => {});
 }
-const wait = (ms) => new Promise((res) => setTimeout(res, ms));
+
+// ---- one page at a time. StPageFlip's single-page mode shows a different page from the one it
+// reports, so phones and upright tablets get this instead: the page peels away around its spine,
+// showing the next one underneath; going back, the previous page swings in on top.
+function buildSolo(page) {
+  try { R.flip?.destroy(); } catch {}
+  R.flip = null; R.solo = true;
+  const stage = $id('flip-stage');
+  if (!stage || !R.pdf) return;
+  const { pw, ph } = layout();
+  R.skip = R.r.showCover !== false && R.pdf.numPages > 1 ? 1 : 0;
+  stage.innerHTML = `<div class="flip-book solo" style="width:${pw}px;height:${ph}px"><div class="solo-page" id="solo-page"></div></div>`;
+  $id('book-open')?.classList.add('ready');
+  showSolo(page);
+}
+const soloRange = (p) => Math.max(1 + R.skip, Math.min(R.pdf.numPages, p));
+function paintSolo(el, p) {
+  if (!el) return;
+  const u = R.urls.get(p - 1);
+  el.innerHTML = u ? `<img src="${u}" alt="Page ${p}" draggable="false">` : '<span class="pf-wait"></span>';
+}
+function showSolo(p) {
+  R.soloPage = soloRange(p);
+  paintSolo($id('solo-page'), R.soloPage);
+  drawAround(toIndex(R.soloPage));
+  if (!R.opening) setPos(R.soloPage);
+}
+async function soloTurn(d) {
+  const next = soloRange(R.soloPage + d);
+  if (next === R.soloPage || R.busy) return;
+  const book = document.querySelector('.flip-book.solo'), cur = $id('solo-page');
+  if (calm() || !book) { showSolo(next); return; }
+  R.busy = true;
+  const leaf = document.createElement('div');
+  leaf.className = `solo-leaf ${d > 0 ? 'away' : 'in'}`;
+  // forward: the page you were on peels off; back: the page you're returning to swings in
+  paintSolo(leaf, d > 0 ? R.soloPage : next);
+  leaf.insertAdjacentHTML('beforeend', '<i class="solo-shade"></i>');
+  if (d > 0) showSolo(next); // already underneath
+  book.append(leaf);
+  $id('book-open')?.classList.add('turning');
+  await new Promise((res) => { leaf.addEventListener('animationend', res, { once: true }); setTimeout(res, 900); });
+  if (d < 0) showSolo(next);
+  leaf.remove();
+  $id('book-open')?.classList.remove('turning');
+  R.busy = false;
+}
+
 async function turn(d) {
+  if (R.solo) return soloTurn(d);
   if (!R.id) return;
   if (R.flip) { d > 0 ? R.flip.flipNext('bottom') : R.flip.flipPrev('bottom'); return; }
   if (!R.rendition || R.busy) return;
@@ -571,7 +646,8 @@ async function turn(d) {
   } finally { R.busy = false; bk?.classList.remove('fading'); }
 }
 function goTo(page) {
-  if (R.flip) R.flip.turnToPage(Math.max(0, Math.min(R.pages.length - 1, toIndex(page))));
+  if (R.solo) showSolo(page);
+  else if (R.flip) R.flip.turnToPage(Math.max(0, Math.min(R.pages.length - 1, toIndex(page))));
   else if (R.rendition && R.epub.locations.length()) R.rendition.display(R.epub.locations.cfiFromPercentage(page / 100));
 }
 function onKey(e) {
@@ -582,14 +658,22 @@ function onKey(e) {
   else if (e.key === 'Escape') location.hash = '#/shelf';
 }
 document.addEventListener('keydown', onKey);
-// swipe to turn an EPUB (StPageFlip handles swipes on PDFs itself)
+// swipe to turn an EPUB or a single page (StPageFlip handles swipes on spreads itself)
 let touchX = null;
-document.addEventListener('touchstart', (e) => { if (R.rendition && e.target.closest('#book-open')) touchX = e.touches[0].clientX; }, { passive: true });
+document.addEventListener('touchstart', (e) => { if ((R.rendition || R.solo) && e.target.closest('#book-open')) touchX = e.touches[0].clientX; }, { passive: true });
+// tap the right side of a single page to go on, the left side to go back
+document.addEventListener('click', (e) => {
+  const pg = R.solo && e.target.closest?.('.flip-book.solo');
+  if (!pg) return;
+  const x = (e.clientX - pg.getBoundingClientRect().left) / pg.clientWidth;
+  turn(x < 0.35 ? -1 : 1);
+});
 document.addEventListener('touchend', (e) => { if (touchX == null) return; const dx = e.changedTouches[0].clientX - touchX; touchX = null; if (Math.abs(dx) > 40) turn(dx < 0 ? 1 : -1); }, { passive: true });
 
 // ---------------------------------------------------------------- handlers
 const ACTS = {
   'lib-open': (el) => {
+    if (held) { held = false; return; } // that was a press-and-hold, not a tap
     const r = S.resources.find((x) => x.id === el.dataset.id);
     if (!r) return;
     // a link-only textbook (or an image upload) opens its page, where a PDF can be added
@@ -644,7 +728,7 @@ async function setCover(r, own) {
   if (own && !r.cover && r.fileId) await makeCover(r);
   const html = coverFace(r, await coverUrl(r));
   document.querySelectorAll(`[data-cover="${r.id}"]`).forEach((el) => { el.innerHTML = html; });
-  const board = R.r === r && (R.pages?.[0]?.querySelector('.board-face') || document.querySelector('.epub-cover .board-face'));
+  const board = R.r === r && (R.pages?.[0]?.querySelector('.board-face') || document.querySelector('.cover-lid .board-face'));
   if (board) board.innerHTML = html;
   // page 1 moves between the front board and the inside, so lay the book out again at the same page
   if (R.r === r && R.pdf) { R.skip = own && R.pdf.numPages > 1 ? 1 : 0; buildFlip(toIndex(r.page || 1)); }
@@ -655,3 +739,15 @@ const CHANGES = {
   'lib-file': (el) => { [...el.files].forEach((f) => addFile(f, el.dataset.where)); el.value = ''; },
   'rd-scrub': (el) => goTo(+el.value),
 };
+
+// ---------------------------------------------------------------- for the importer (import.js)
+export { readMeta, guessSubject };
+export const loadZip = () => (window.JSZip ? Promise.resolve(window.JSZip) : script(JSZIP).then(() => window.JSZip));
+// is the first page wider than tall? (that's a slide deck, not a textbook)
+export async function peekPdf(file) {
+  const pdf = await (await pdfjs()).getDocument({ data: await file.arrayBuffer() }).promise;
+  const v = (await pdf.getPage(1)).getViewport({ scale: 1 });
+  const out = { landscape: v.width > v.height * 1.15, pages: pdf.numPages };
+  pdf.destroy();
+  return out;
+}
