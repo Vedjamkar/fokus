@@ -1,2 +1,2 @@
 // Written by release.sh: the app compares this with version.json online to spot updates.
-export const VERSION = '20261027233612';
+export const VERSION = '20261029120600';

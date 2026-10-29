@@ -31,6 +31,9 @@ let onTasksFn = () => {};
 export const onTasks = (fn) => { onTasksFn = fn; };
 let tasksNow = () => [];
 export const provideTasks = (fn) => { tasksNow = fn; };
+// lending books (bookshare.js): a list of titles goes round the room, a book's file only on request
+let onBookFn = () => {};
+export const onBook = (fn) => { onBookFn = fn; };
 
 let clients = [], beat = 0, giveUp = 0;
 const seen = new Set(), seenOrder = [];
@@ -57,7 +60,7 @@ function loadMqtt() {
 
 // one tiny interface over both kinds of relay: { name, ok, publish(body), close() }
 function mqttTransport(url, room) {
-  const t = { name: new URL(url).hostname, ok: false, publish: () => {}, close: () => {} };
+  const t = { name: new URL(url).hostname, kind: 'mqtt', ok: false, publish: () => {}, close: () => {} };
   if (!window.mqtt) return t;
   const c = window.mqtt.connect(url, { clientId: `fokus_${mid()}`, clean: true, keepalive: 30, reconnectPeriod: 3000, connectTimeout: 10_000 });
   c.on('connect', () => c.subscribe(TOPIC(room), { qos: 0 }, () => { t.ok = true; ready(); }));
@@ -97,6 +100,7 @@ function ready() {
     TG.status = 'on'; clearTimeout(giveUp); remember({ room: TG.room });
     // bring along anything added to this room's list while we were away
     setTimeout(() => { const list = tasksNow(); if (TG.status === 'on' && list.length) send({ t: 'tasks', list: list.slice(-80) }); }, 800);
+    setTimeout(() => { if (TG.status === 'on') onBookFn({ t: 'book-hello' }); }, 1200);
   }
   announce(true); emit();
 }
@@ -116,7 +120,7 @@ function handle(raw) {
   if (msg.t === 'presence' && msg.member?.id) {
     const isNew = !TG.members.has(msg.member.id);
     TG.members.set(msg.member.id, msg.member); lastSeen.set(msg.member.id, Date.now());
-    if (isNew && msg.hello) { announce(); shareHistory(); } // say hi back so they see us straight away
+    if (isNew && msg.hello) { announce(); shareHistory(); onBookFn({ t: 'book-hello', from: msg.member.id }); } // say hi back so they see us straight away
   }
   if (msg.t === 'bye') { TG.members.delete(msg.id); lastSeen.delete(msg.id); }
   if (msg.t === 'chat' && msg.line) { addChat(msg.line); if (typeof msg.line.text === 'string') onChatFn(msg.from, msg.line); }
@@ -125,6 +129,7 @@ function handle(raw) {
   if (msg.t === 'task' && msg.task?.id) onTasksFn([msg.task]);
   if (msg.t === 'tasks' && Array.isArray(msg.list)) onTasksFn(msg.list.slice(0, 120));
   if (msg.t === 'gift' && typeof msg.item === 'string') { const m = TG.members.get(msg.from); onGiftFn({ id: msg.mid, item: msg.item.slice(0, 20), from: m?.name || msg.name || 'A friend', color: m?.color || msg.color || '#e0725f', at: Date.now() }); }
+  if (typeof msg.t === 'string' && msg.t.startsWith('book') && msg.t !== 'book-hello') onBookFn(msg);
   if (msg.t === 'act' && typeof msg.act === 'string') { lastSeen.set(msg.from, Date.now()); onActFn(msg.from, msg.act.slice(0, 20), TG.members.get(msg.from)?.name || 'Someone'); }
   emit();
 }
@@ -203,6 +208,19 @@ export function task(t) {
   send({ t: 'task', task: t });
   return true;
 }
+// a book message. Big ones (pieces of a file) go through the MQTT brokers only: the Nostr relays
+// sign, size-limit and rate-limit every message, so a book sent as hundreds of them would be dropped.
+// Returns how many servers it went out on (0: none that can carry it).
+export function book(msg, big) {
+  if (TG.status !== 'on') return 0;
+  const via = big ? clients.filter((c) => c.kind === 'mqtt' && c.ok) : clients;
+  if (!via.length) return 0;
+  msg.mid = mid(); msg.from = TG.me.id; markSeen(msg.mid);
+  const body = JSON.stringify(msg);
+  for (const c of via) c.publish(body);
+  return via.length;
+}
+export const canCarryBooks = () => clients.some((c) => c.kind === 'mqtt' && c.ok);
 export function shareTimer(timer) {
   if (TG.status !== 'on') return;
   send({ t: 'timer', timer, by: TG.me.name });

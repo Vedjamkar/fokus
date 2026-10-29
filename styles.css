@@ -978,6 +978,20 @@ body.in-room.room-bg .bg-photo { filter: none; transform: none; }
 .slot.lean { margin-right: calc(var(--h) * .13 + 4px); }
 .slot.lean .bk { transform: rotate(7deg); transform-origin: 100% 100%; }
 .slot.lean:hover .bk { transform: rotate(4deg) translateY(-6px); }
+/* lending: a people button beside remove, and a brass tag on lent and borrowed books */
+.bk-lend { position: absolute; z-index: 4; width: 22px; height: 22px; border: 0; padding: 0; border-radius: 50%; display: grid; place-items: center; cursor: pointer; color: #f3e9d6;
+  background: rgba(20, 13, 8, .88); box-shadow: 0 2px 6px rgba(0, 0, 0, .45), inset 0 0 0 1px rgba(243, 233, 214, .2); opacity: 0; transform: scale(.8); transition: opacity .15s, transform .15s, background .15s;
+  left: -9px; bottom: calc(var(--plank) + var(--h) * var(--s) - 2px); }
+.bk-lend svg { width: 12px; height: 12px; }
+.bk-lend:hover, .bk-lend.on { background: #9a7424; }
+.slot:hover > .bk-lend, .slot:focus-within > .bk-lend, .slot.armed > .bk-lend { opacity: 1; transform: translateY(-9px) scale(1); }
+.bk-tag { position: absolute; bottom: 9%; left: 50%; width: 9px; height: 9px; margin-left: -4.5px; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle at 35% 30%, #fbe7a6, #c99a3a 55%, #7a5a1c); box-shadow: 0 1px 1px rgba(0, 0, 0, .5); }
+.bk-tag.in { background: radial-gradient(circle at 35% 30%, #e9eef2, #9aa6ad 55%, #4f585e); }
+/* the room shelf: friends' books, and copies you've borrowed */
+.bay-note { align-self: center; margin: 0 0 calc(var(--plank) + 30px); padding: 10px 14px; max-width: 360px; font-size: 13px; line-height: 1.45; color: #f3e9d6; background: rgba(20, 13, 8, .55); border-radius: 8px; }
+/* a book on its way fills up from the bottom as its pieces arrive */
+.bk.loading { -webkit-mask: linear-gradient(to top, #000 calc(var(--load, 0) * 100%), rgba(0, 0, 0, .32) 0); mask: linear-gradient(to top, #000 calc(var(--load, 0) * 100%), rgba(0, 0, 0, .32) 0); transform: translateY(-9px); cursor: progress; }
 .ribbon { position: absolute; bottom: calc(var(--plank) - var(--rl) + 2px); left: calc(50% - 3px); width: 7px; height: var(--rl); background: linear-gradient(90deg, #8f1d22, #c7353a 50%, #8f1d22); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%); z-index: 2; pointer-events: none; filter: drop-shadow(0 2px 1px rgba(0, 0, 0, .4)); }
 .bk-tip { position: absolute; bottom: calc(var(--h) * var(--s) + var(--plank) + 16px); left: 50%; transform: translate(-50%, 4px); background: rgba(20, 13, 8, .92); color: #f3e9d6; font: 500 12px var(--f-ui); padding: 5px 10px; border-radius: 7px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .15s, transform .15s; z-index: 6; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 .slot:hover .bk-tip { opacity: 1; transform: translate(-50%, 0); }

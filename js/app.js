@@ -11,6 +11,7 @@ import * as AV from './avatar.js';
 import * as SC from './scenes.js';
 import * as TGM from './together.js';
 import { initLibrary, forgetBook, shelfList } from './library.js';
+import { friendShelves, lent } from './bookshare.js';
 import * as GC from './gcal.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -1435,6 +1436,8 @@ function togetherHTML() {
       <span class="who"><b>${esc(m.name)}${m.id === myId ? ' (you)' : ''}</b><small>${esc([m.subject, m.task].filter(Boolean).join(' · ') || 'No task set')}</small></span>
       <span class="st ${m.status}" data-fclock="${m.id}">${statusText(m)}</span></div>`).join('')}</div>
     ${actBarHTML()}
+    ${(() => { const n = friendShelves().reduce((a, f) => a + f.list.length, 0), mine = S.resources.filter(lent).length;
+      return `<a class="btn" href="#/shelf" style="align-self:flex-start">${ic('layers')} Room shelf · ${n ? `${n} ${n === 1 ? 'book' : 'books'} to borrow` : 'nothing lent yet'}${mine ? ` · you lend ${mine}` : ''}</a>`; })()}
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="pill accent" data-act="tg-group">Start a group focus</button>
       <label class="switch" style="font-size:13.5px"><input type="checkbox" data-act="tg-sync" ${ui.syncTimer ? 'checked' : ''}> Keep timers in sync</label></div>
@@ -2352,7 +2355,7 @@ const VIEWS = { setup: setupView, studio: studioView, today: todayView, subjects
 // GitHub Pages lets browsers keep files for 10 minutes, so friends could end up on different
 // versions. When version.json online is newer than this copy, re-download every file into the
 // browser cache and reload, so everyone runs the same thing.
-const APP_FILES = ['./', 'index.html', 'styles.css', 'version.json', 'sw.js', ...['app', 'store', 'md', 'player', 'sounds', 'together', 'room', 'visualiser', 'version', 'avatar', 'scenes', 'library'].map((f) => `js/${f}.js`)];
+const APP_FILES = ['./', 'index.html', 'styles.css', 'version.json', 'sw.js', ...['app', 'store', 'md', 'player', 'sounds', 'together', 'room', 'visualiser', 'version', 'avatar', 'scenes', 'library', 'bookshare'].map((f) => `js/${f}.js`)];
 let updating = false;
 async function checkForUpdate() {
   if (updating || location.hostname === 'localhost') return;

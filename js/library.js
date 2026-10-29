@@ -4,6 +4,8 @@
 // The reader turns PDF pages with StPageFlip (real page curls, corner drags, shadows); EPUBs are
 // laid out by epub.js. All three libraries load only when a book is opened or added.
 import { S, save, uid, putFile, getFile, delFile, subjectById } from './store.js';
+import { initShare, lent, toggleLend, friendShelves, borrow, loanOf } from './bookshare.js';
+import { TG } from './together.js';
 
 const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/';
 const JSZIP = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
@@ -11,7 +13,11 @@ const EPUBJS = 'https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js';
 const PAGEFLIP = 'https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.module.js';
 
 let D; // helpers handed over by app.js: esc, ic, toast, render, openForm
-export function initLibrary(deps) { D = deps; return { shelfView, syncReader, ACTS, CHANGES, dropOnShelf }; }
+export function initLibrary(deps) {
+  D = deps;
+  initShare({ render: D.render, toast: D.toast, color: spineColor, onRoute: (name) => location.hash.startsWith(`#/${name}`) });
+  return { shelfView, syncReader, ACTS, CHANGES, dropOnShelf };
+}
 
 // ---------------------------------------------------------------- small helpers
 const hash = (s) => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; };
@@ -60,15 +66,22 @@ function spineHTML(r, opts = {}) {
   const p = prog(r);
   const reading = p > 0 && p < 1;
   const sub = r.type === 'textbook' ? subjectById(r.subjectId) : null;
-  const tip = `${r.title || 'Untitled'}${r.author ? ` · ${r.author}` : ''}${r.pages ? ` · ${Math.round(p * 100)}%` : r.fileId ? '' : ' · no file yet'}`;
+  const tip = opts.owner ? `${r.title}${r.author ? ` · ${r.author}` : ''} · borrow from ${opts.ownerName}`
+    : `${r.title || 'Untitled'}${r.author ? ` · ${r.author}` : ''}${r.pages ? ` · ${Math.round(p * 100)}%` : r.fileId ? '' : ' · no file yet'}${r.borrowed ? ` · borrowed from ${r.borrowed.from}` : lent(r) ? ' · lent to your study room' : ''}`;
+  const loan = opts.owner && loanOf(opts.owner, r.id);
+  // a friend's book on the room shelf: tap to borrow it, and it fills up as it arrives
+  const act = opts.owner ? `data-act="lib-borrow" data-owner="${esc(opts.owner)}" data-id="${esc(r.id)}" data-loan="${esc(`${opts.owner}:${r.id}`)}"`
+    : `draggable="true" data-book="${r.id}" data-act="lib-open" data-id="${r.id}"`;
   return `<div class="slot${opts.lean ? ' lean' : ''}" style="--h:${h}px;--w:${w}px">
-    <button class="bk ${look}${r.type === 'textbook' ? ' study' : ''}" draggable="true" data-book="${r.id}" data-act="lib-open" data-id="${r.id}" style="--c:${esc(spineColor(r))};--t:${spineInk(r)}" aria-label="${esc(tip)}">
+    <button class="bk ${look}${r.type === 'textbook' ? ' study' : ''}${loan ? ' loading' : ''}" ${act} style="--c:${esc(spineColor(r))};--t:${spineInk(r)}${loan ? `;--load:${(loan.got / loan.of).toFixed(3)}` : ''}" aria-label="${esc(tip)}">
       <span class="bk-title">${esc(r.title || 'Untitled')}</span>
       ${r.author && w > 30 ? `<span class="bk-auth">${esc(r.author.split(/[ ,]/).filter(Boolean).pop())}</span>` : sub?.code && w > 30 ? `<span class="bk-auth">${esc(sub.code)}</span>` : ''}
       ${r.status === 'done' && r.type === 'book' ? '<span class="bk-star" aria-hidden="true">★</span>' : ''}
       ${r.marks?.length ? '<i class="bk-slip" aria-hidden="true"></i>' : ''}
+      ${lent(r) || r.borrowed ? `<i class="bk-tag${r.borrowed ? ' in' : ''}" aria-hidden="true"></i>` : ''}
     </button>
-    <button class="bk-x" data-act="lib-remove" data-id="${r.id}" aria-label="Remove ${esc(r.title || 'this book')} from the shelf" title="Remove from shelf">${D.ic('x')}</button>
+    ${opts.owner ? '' : `<button class="bk-x" data-act="lib-remove" data-id="${r.id}" aria-label="${r.borrowed ? 'Give back' : 'Remove'} ${esc(r.title || 'this book')}" title="${r.borrowed ? 'Give back (deletes your copy)' : 'Remove from shelf'}">${D.ic('x')}</button>
+    ${r.fileId && !r.borrowed ? `<button class="bk-lend${lent(r) ? ' on' : ''}" data-act="lib-lend" data-id="${r.id}" aria-pressed="${lent(r)}" aria-label="${lent(r) ? 'Stop lending' : 'Lend'} ${esc(r.title || 'this book')} to your study room" title="${lent(r) ? 'Lent to your study room. Click to stop' : 'Lend to your study room'}">${D.ic('users')}</button>` : ''}`}
     ${reading ? `<i class="ribbon" style="--rl:${Math.round(18 + p * 26)}px" aria-hidden="true"></i>` : ''}
     <span class="bk-tip">${esc(tip)}</span>
   </div>`;
@@ -98,8 +111,9 @@ function coverFace(r, url) {
 function shelfView() {
   const { esc, ic } = D;
   const books = S.resources.filter(isBook);
-  const study = books.filter((r) => r.type === 'textbook');
-  const leisure = books.filter((r) => r.type === 'book');
+  const own = books.filter((r) => !r.borrowed);
+  const study = own.filter((r) => r.type === 'textbook');
+  const leisure = own.filter((r) => r.type === 'book');
   // the display ledge on top: what you're in the middle of, most recent first
   const now = books.filter((r) => prog(r) > 0 && prog(r) < 1).sort((a, b) => b.updated - a.updated).slice(0, 4);
   const groups = [...S.subjects.map((s) => ({ s, list: study.filter((r) => r.subjectId === s.id) })), { s: null, list: study.filter((r) => !subjectById(r.subjectId)) }].filter((g) => g.list.length);
@@ -127,6 +141,7 @@ function shelfView() {
     <div class="case">
       <div class="crown"></div>
       <div class="ledge"><div class="ledge-row">${ledge}</div><span class="plant" aria-hidden="true"><i></i><i></i><i></i><i></i><b></b></span></div>
+      ${roomBay(books.filter((r) => r.borrowed))}
       <section class="bay" data-drop-shelf="study" aria-label="Study shelf">
         <div class="plate fixed"><span>Study</span><small>${count(study.length)}</small></div>
         <div class="books">${studyRow}${addSlot('study', 'Add textbook')}</div>
@@ -136,6 +151,23 @@ function shelfView() {
     </div>
     <p class="shelf-hint">Books stay on this computer. Click a shelf’s nameplate to rename it.</p>
   </div>`;
+}
+// the room shelf: books your study-room friends lend (borrow one by opening it), and copies you've borrowed
+function roomBay(borrowed) {
+  const { esc } = D;
+  const inRoom = TG.status === 'on';
+  if (!inRoom && !borrowed.length) return '';
+  const friends = inRoom ? friendShelves() : [];
+  const lending = S.resources.filter(lent).length;
+  const hint = !inRoom ? '' : friends.length ? ''
+    : `<p class="bay-note">${lending ? `Nobody else here is lending books yet. Friends who join room ${esc(TG.room)} can borrow the ${lending === 1 ? 'one' : lending} you lend.` : 'Nobody here is lending books yet. To lend one of yours, hover it and press the people button.'}</p>`;
+  return `<section class="bay room" aria-label="Room shelf">
+    <div class="plate fixed"><span>${inRoom ? `Room ${esc(TG.room)}` : 'Borrowed'}</span><small>${inRoom ? `${lending ? `you lend ${lending}` : 'borrow from friends'}` : `${borrowed.length} ${borrowed.length === 1 ? 'copy' : 'copies'}`}</small></div>
+    <div class="books">${friends.map((f) => `<div class="divider" style="--c:${esc(f.member.color || '#6b5a48')}"><span>${esc(f.member.name || 'Friend')}</span></div>
+      ${f.list.map((b) => spineHTML({ ...b, status: 'later' }, { owner: f.member.id, ownerName: f.member.name || 'a friend' })).join('')}`).join('')}
+      ${borrowed.length ? `${inRoom ? '<div class="divider"><span>Borrowed</span></div>' : ''}${borrowed.map((r) => spineHTML(r)).join('')}` : ''}
+      ${hint}</div>
+  </section>`;
 }
 async function hydrateCovers() {
   for (const el of document.querySelectorAll('[data-cover]')) {
@@ -683,6 +715,13 @@ const ACTS = {
     if (matchMedia('(max-width: 760px), (pointer: coarse)').matches) enterFull();
     setTimeout(() => { location.hash = `#/read/${r.id}`; }, calm() ? 0 : 280);
   },
+  'lib-borrow': (el) => {
+    if (held) { held = false; return; }
+    // a copy you already have opens straight away, so it can go fullscreen within the tap
+    if (S.resources.some((r) => r.borrowed?.src === el.dataset.id) && matchMedia('(max-width: 760px), (pointer: coarse)').matches) enterFull();
+    borrow(el.dataset.owner, el.dataset.id);
+  },
+  'lib-lend': (el) => { const r = S.resources.find((x) => x.id === el.dataset.id); if (r) { toggleLend(r); D.render(); } },
   'rd-turn': (el) => turn(+el.dataset.d),
   'rd-full': () => { if (isFull()) { fullForReading = false; leaveFull(); } else { enterFull(); } },
   'rd-go': (el) => goTo(+el.dataset.p),
