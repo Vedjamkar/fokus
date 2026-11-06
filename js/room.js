@@ -336,35 +336,35 @@ export async function mountRoom(host, opts) {
     g.fillStyle = '#f6f4ee'; g.fillRect(0, 0, w, h);
     g.fillStyle = 'rgba(40,40,60,.05)'; for (let i = 0; i < 26; i++) g.fillRect((i * 97) % w, (i * 53) % h, 40 + (i * 31) % 90, 2); // old marker ghosts
     let y = 20;
-    const head = (t) => { y += 46; g.fillStyle = ink; g.font = hand(48); g.fillText(t, 26, y); y += 10; };
+    const head = (t) => { y += 54; g.fillStyle = ink; g.font = hand(60); g.fillText(t, 26, y); y += 12; };
     const row = (t) => {
-      g.strokeStyle = '#2b2838'; g.lineWidth = 3; g.strokeRect(30, y + 8, 24, 24);
-      if (t.done) { g.strokeStyle = ink; g.lineWidth = 5; g.lineCap = 'round'; g.beginPath(); g.moveTo(33, y + 20); g.lineTo(41, y + 30); g.lineTo(58, y + 4); g.stroke(); }
-      const text = t.text.length > 25 ? `${t.text.slice(0, 24)}…` : t.text;
-      g.fillStyle = t.done ? '#9a968c' : '#24212c'; g.font = hand(34); g.fillText(text, 68, y + 31);
-      if (t.done) { g.strokeStyle = '#9a968c'; g.lineWidth = 2; g.beginPath(); g.moveTo(66, y + 21); g.lineTo(70 + g.measureText(text).width, y + 21); g.stroke(); }
-      y += 42;
+      g.strokeStyle = '#2b2838'; g.lineWidth = 4; g.strokeRect(28, y + 8, 32, 32);
+      if (t.done) { g.strokeStyle = ink; g.lineWidth = 6; g.lineCap = 'round'; g.beginPath(); g.moveTo(32, y + 24); g.lineTo(42, y + 36); g.lineTo(64, y + 4); g.stroke(); }
+      const text = t.text.length > 17 ? `${t.text.slice(0, 16)}…` : t.text;
+      g.fillStyle = t.done ? '#8a867c' : '#1c1a24'; g.font = hand(46); g.fillText(text, 74, y + 38);
+      if (t.done) { g.strokeStyle = '#8a867c'; g.lineWidth = 3; g.beginPath(); g.moveTo(72, y + 26); g.lineTo(76 + g.measureText(text).width, y + 26); g.stroke(); }
+      y += 52;
     };
-    const more = (n) => { if (n > 0) { g.fillStyle = '#8a8679'; g.font = hand(28); g.fillText(`+ ${n} more`, 68, y + 22); y += 32; } };
+    const more = (n) => { if (n > 0) { g.fillStyle = '#8a8679'; g.font = hand(34); g.fillText(`+ ${n} more`, 74, y + 26); y += 38; } };
     const list = (items, max) => { items.slice(0, max).forEach(row); more(items.length - max); };
-    if (L.inRoom) { head('Together'); if (L.shared.length) list(L.shared, 5); else { g.fillStyle = '#8a8679'; g.font = hand(30); g.fillText('nothing shared yet', 34, y + 30); y += 42; } }
+    if (L.inRoom) { head('Together'); if (L.shared.length) list(L.shared, 3); else { g.fillStyle = '#8a8679'; g.font = hand(36); g.fillText('nothing shared yet', 34, y + 34); y += 50; } }
     head('Mine');
-    if (L.mine.length) list(L.mine, L.inRoom ? 4 : 9); else { g.fillStyle = '#8a8679'; g.font = hand(30); g.fillText('click to add a task', 34, y + 30); y += 42; }
+    if (L.mine.length) list(L.mine, L.inRoom ? 3 : 7); else { g.fillStyle = '#8a8679'; g.font = hand(36); g.fillText('click to add a task', 34, y + 34); y += 50; }
     (L.friends || []).slice(0, 3).forEach((f, i) => {
-      const fy = h - 26 - i * 34;
+      const fy = h - 26 - i * 38;
       g.fillStyle = f.color || '#888'; g.beginPath(); g.arc(36, fy - 9, 8, 0, 7); g.fill();
-      g.fillStyle = '#4a4656'; g.font = font(700, 20); g.fillText(`${f.name.slice(0, 16)} · ${f.done} of ${f.total} done`, 52, fy);
+      g.fillStyle = '#4a4656'; g.font = font(700, 24); g.fillText(`${f.name.slice(0, 14)} · ${f.done} of ${f.total} done`, 52, fy);
     });
   });
   const easel = new THREE.Group(); at(easel, -1.7, 0, 4.0); easel.rotation.y = 0.7; easel.scale.setScalar(1.12);
   const easelWood = mat(0x8a5a3b, { roughness: 0.8 });
-  const sheet = new THREE.Group(); at(sheet, 0, 2.05, 0); sheet.rotation.x = -0.1; easel.add(sheet);
+  const sheet = new THREE.Group(); at(sheet, 0, 2.55, 0); sheet.rotation.x = -0.1; sheet.scale.setScalar(1.4); easel.add(sheet);
   sheet.add(at(box(1.5, 1.875, 0.04, mat(0xffffff, { map: tasksTex.tex, roughness: 0.6 }), 0.01), 0, 0, 0.03));
   sheet.add(at(box(1.62, 1.99, 0.05, mat(0xd8d6d0, { roughness: 0.5 }), 0.02), 0, 0, 0));
   sheet.add(at(box(1.5, 0.06, 0.16, easelWood, 0.01), 0, -1.0, 0.08)); // marker tray
   sheet.add(at(cyl(0.025, 0.025, 0.26, mat(0x2f6fd8), 8).rotateZ(Math.PI / 2), 0.35, -0.95, 0.1));
-  for (const [x, z, tilt] of [[-0.6, 0.18, -0.07], [0.6, 0.18, 0.07]]) { const leg = cyl(0.035, 0.035, 3.0, easelWood, 8); at(leg, x, 1.45, z); leg.rotation.z = tilt; leg.rotation.x = -0.1; easel.add(leg); }
-  const back = cyl(0.035, 0.035, 2.9, easelWood, 8); at(back, 0, 1.38, -0.42); back.rotation.x = 0.3; easel.add(back);
+  for (const [x, z, tilt] of [[-0.85, -0.16, -0.07], [0.85, -0.16, 0.07]]) { const leg = cyl(0.04, 0.04, 3.9, easelWood, 8); at(leg, x, 1.9, z); leg.rotation.z = tilt; leg.rotation.x = -0.1; easel.add(leg); }
+  const back = cyl(0.04, 0.04, 3.6, easelWood, 8); at(back, 0, 1.8, -0.5); back.rotation.x = 0.3; easel.add(back);
   scene.add(pick(easel, 'tasks'));
 
   // ---------- poster: shows your current background

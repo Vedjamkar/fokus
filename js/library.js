@@ -3,8 +3,8 @@
 // spine width from page count, colour from the subject or a cloth binding picked from the id.
 // The reader turns PDF pages with StPageFlip (real page curls, corner drags, shadows); EPUBs are
 // laid out by epub.js. All three libraries load only when a book is opened or added.
-import { S, save, uid, putFile, getFile, delFile, subjectById } from './store.js';
-import { initShare, lent, toggleLend, friendShelves, borrow, loanOf } from './bookshare.js';
+import { S, save, uid, putFile, getFile, delFile, subjectById, LOST } from './store.js';
+import { initShare, lent, toggleLend, sendBook, friendShelves, borrow, loanOf } from './bookshare.js';
 import { TG } from './together.js';
 
 const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/';
@@ -16,8 +16,7 @@ let D; // helpers handed over by app.js: esc, ic, toast, render, openForm
 export function initLibrary(deps) {
   D = deps;
   initShare({ render: D.render, toast: D.toast, color: spineColor, onRoute: (name) => location.hash.startsWith(`#/${name}`) });
-  return { shelfView, syncReader, ACTS, CHANGES, dropOnShelf };
-}
+  return { shelfView, syncReader, ACTS, CHANGES, dropOnShelf, lostBanner }; }
 
 // ---------------------------------------------------------------- small helpers
 const hash = (s) => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; };
@@ -138,6 +137,7 @@ function shelfView() {
       <button class="btn primary" data-act="imp-open">${ic('upload')} Import</button>
       <button class="btn" data-act="shelf-new">${ic('plus')} New shelf</button>
       <button class="btn" data-act="res-new" data-type="textbook">${ic('link')} Textbook from a link</button></div>
+    ${lostBanner()}
     <div class="case">
       <div class="crown"></div>
       <div class="ledge"><div class="ledge-row">${ledge}</div><span class="plant" aria-hidden="true"><i></i><i></i><i></i><i></i><b></b></span></div>
@@ -151,6 +151,21 @@ function shelfView() {
     </div>
     <p class="shelf-hint">Books stay on this computer. Click a shelf’s nameplate to rename it.</p>
   </div>`;
+}
+// Share a book from the shelf: lend it to the whole room, or send it to one friend
+function shareSheet(r) {
+  const { esc, ic } = D;
+  const inRoom = TG.status === 'on';
+  const friends = inRoom ? [...TG.members.values()].filter((m) => m.id !== TG.me?.id) : [];
+  const body = !inRoom
+    ? `<p class="muted" style="margin:0">Start or join a study room and you can lend this book to everyone in it, or send it to one friend.</p>`
+    : `<div class="share-row"><div><b>Lend to the room</b><small>${lent(r) ? 'Everyone in room ' + esc(TG.room) + ' can borrow a copy' : 'Anyone in room ' + esc(TG.room) + ' could borrow a copy'}</small></div>
+        <button class="btn ${lent(r) ? '' : 'primary'}" data-act="lib-lend-toggle" data-id="${r.id}">${lent(r) ? 'Stop lending' : 'Lend'}</button></div>
+      <div class="g-label" style="margin-top:6px">Send to one friend</div>
+      ${friends.map((m) => `<div class="share-row"><div style="display:flex;gap:8px;align-items:center"><i style="width:10px;height:10px;border-radius:50%;background:${esc(m.color || '#888')}"></i><b>${esc(m.name || 'Friend')}</b></div><button class="btn" data-act="lib-send" data-id="${r.id}" data-to="${esc(m.id)}">${ic('upload')} Send</button></div>`).join('')
+        || '<p class="muted" style="margin:0">Nobody else is in the room yet. Share the invite link and they can take it from here.</p>'}`;
+  D.showModal(`<div class="modal-box" role="dialog" aria-modal="true" aria-label="Share ${esc(r.title || 'this book')}"><h3>Share “${esc(r.title || 'Untitled')}”</h3>${body}
+    <div class="acts"><button class="btn ghost" data-act="m-close">Done</button></div></div>`);
 }
 // the room shelf: books your study-room friends lend (borrow one by opening it), and copies you've borrowed
 function roomBay(borrowed) {
@@ -177,6 +192,16 @@ async function hydrateCovers() {
     const u = await coverUrl(r);
     if (u) el.innerHTML = coverFace(r, u);
   }
+}
+
+// The browser cleared some stored files (it can, when the disk is low): say which books need theirs again.
+function lostBanner() {
+  const { esc, ic } = D;
+  const gone = S.resources.filter((r) => LOST.has(r.id));
+  if (!gone.length) return '';
+  return `<div class="lost" role="alert"><b>${gone.length} ${gone.length === 1 ? 'book has' : 'books have'} lost ${gone.length === 1 ? 'its' : 'their'} file</b>
+    <span>The browser cleared some stored files. Open each one and drop the file in again, or restore a backup.</span>
+    <div class="lost-list">${gone.slice(0, 8).map((r) => `<a class="chip" href="#/r/${r.id}">${esc(r.title || 'Untitled')}</a>`).join('')}${gone.length > 8 ? `<small>and ${gone.length - 8} more</small>` : ''}<a class="btn" href="#/settings">${ic('upload')} Restore a backup</a></div></div>`;
 }
 
 // ---------------------------------------------------------------- adding books: drop it and it's shelved
@@ -709,7 +734,7 @@ const ACTS = {
     const r = S.resources.find((x) => x.id === el.dataset.id);
     if (!r) return;
     // a link-only textbook (or an image upload) opens its page, where a PDF can be added
-    if (!r.fileId || /\.(png|jpe?g|gif|webp)$/i.test(r.fileName || '')) { location.hash = `#/r/${r.id}`; return; }
+    if (!r.fileId || LOST.has(r.id) || /\.(png|jpe?g|gif|webp)$/i.test(r.fileName || '')) { location.hash = `#/r/${r.id}`; return; }
     el.classList.add('pulled');
     // still inside the tap, which browsers require before going fullscreen
     if (matchMedia('(max-width: 760px), (pointer: coarse)').matches) enterFull();
@@ -721,7 +746,9 @@ const ACTS = {
     if (S.resources.some((r) => r.borrowed?.src === el.dataset.id) && matchMedia('(max-width: 760px), (pointer: coarse)').matches) enterFull();
     borrow(el.dataset.owner, el.dataset.id);
   },
-  'lib-lend': (el) => { const r = S.resources.find((x) => x.id === el.dataset.id); if (r) { toggleLend(r); D.render(); } },
+  'lib-lend': (el) => { const r = S.resources.find((x) => x.id === el.dataset.id); if (r) shareSheet(r); },
+  'lib-lend-toggle': (el) => { const r = S.resources.find((x) => x.id === el.dataset.id); if (r) { toggleLend(r); D.render(); shareSheet(r); } },
+  'lib-send': (el) => { const r = S.resources.find((x) => x.id === el.dataset.id); if (r) { sendBook(r, el.dataset.to); D.closeModal(); } },
   'rd-turn': (el) => turn(+el.dataset.d),
   'rd-full': () => { if (isFull()) { fullForReading = false; leaveFull(); } else { enterFull(); } },
   'rd-go': (el) => goTo(+el.dataset.p),

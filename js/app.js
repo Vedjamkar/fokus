@@ -1,6 +1,6 @@
 import {
   S, save, uid, todayISO, addDays, parseISO, iso, subjectById, topicsIn, pct, counts, findNode, chaptersOf,
-  putFile, getFile, delFile, replaceAll, clearExamples, resetToExamples, hasExamples, startOver, removePlaceholders, restoreBeforeCleanup, BACKUP_KEY,
+  putFile, getFile, delFile, LOST, checkFiles, replaceAll, clearExamples, resetToExamples, hasExamples, startOver, removePlaceholders, restoreBeforeCleanup, BACKUP_KEY,
 } from './store.js';
 import { renderNote, toggleTask } from './md.js';
 import * as YT from './player.js';
@@ -12,6 +12,8 @@ import * as SC from './scenes.js';
 import * as TGM from './together.js';
 import { initLibrary, forgetBook, shelfList } from './library.js';
 import { friendShelves, lent } from './bookshare.js';
+import { initImport } from './import.js';
+import * as BK from './backup.js';
 import * as GC from './gcal.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -260,6 +262,7 @@ function render() {
     if (location.hash !== ui.lastHash) view.scrollTop = 0;
     $$('[data-note]', view).forEach(mountNote);
     if (r.name === 'resource') mountViewer(S.resources.find((x) => x.id === r.id));
+    if (r.name === 'settings') BK.paintStatus(esc);
   }
   ui.lastHash = location.hash;
   room?.update(roomState());
@@ -671,7 +674,7 @@ function resTableHTML(list, type) {
   const chName = (r) => chaptersOf(subjectById(r.subjectId)).find((c) => c.id === r.chapterId)?.name || '';
   return `<div class="table-wrap"><table class="db"><thead><tr><th>Name</th><th>Subject</th><th>Chapter</th>${type === 'note' ? '' : '<th>Progress</th>'}<th>Edited</th></tr></thead><tbody>
     ${[...list].sort((a, b) => b.updated - a.updated).map((r) => `<tr class="click" data-act="go" data-href="#/r/${r.id}">
-      <td><span class="title-cell">${ic(TYPE_ICON[r.type])}<span>${esc(r.title || 'Untitled')}</span>${r.fileId ? '<span class="chip">PDF</span>' : ''}</span></td>
+      <td><span class="title-cell">${ic(TYPE_ICON[r.type])}<span>${esc(r.title || 'Untitled')}</span>${r.fileId && !LOST.has(r.id) ? '<span class="chip">PDF</span>' : ''}${LOST.has(r.id) ? '<span class="chip warn">file missing</span>' : ''}</span></td>
       <td>${subjChip(r.subjectId)}</td><td class="muted ellip" style="max-width:220px">${esc(chName(r))}</td>
       ${type === 'note' ? '' : `<td style="min-width:150px">${r.pages ? progBar(Math.min(100, Math.round((r.page / r.pages) * 100))) : '<span class="muted">—</span>'}</td>`}
       <td class="muted num" style="white-space:nowrap">${ago(r.updated)}</td></tr>`).join('')}</tbody></table></div>`;
@@ -682,8 +685,9 @@ function libraryView(r) {
   return `<div class="page wide">
     <div class="ph-row"><div class="ph"><h1>${TYPE_LABEL[r.tab]}</h1><p>${blurb}</p></div>
       <select class="input" style="flex:none;width:auto" data-change="lib-subject" aria-label="Filter by subject">${subjOptions(ui.libSubject, 'All subjects')}</select>
-      <button class="btn primary" data-act="res-new" data-type="${r.tab}" data-subject="${ui.libSubject}">${ic('plus')} New ${TYPE_ONE[r.tab].toLowerCase()}</button></div>
-    ${resTableHTML(list, r.tab)}</div>`;
+      ${r.tab === 'note' ? '' : `<button class="btn" data-act="res-new" data-type="${r.tab}" data-subject="${ui.libSubject}">${ic('plus')} New ${TYPE_ONE[r.tab].toLowerCase()}</button>`}
+      <button class="btn primary" data-act="imp-open" data-type="${r.tab}" data-subject="${ui.libSubject}">${ic('upload')} Import</button></div>
+    ${LIB.lostBanner()}${resTableHTML(list, r.tab)}</div>`;
 }
 function resourceView(rt) {
   const r = S.resources.find((x) => x.id === rt.id);
@@ -711,7 +715,7 @@ function resourceView(rt) {
   } else {
     const linkedNotes = S.resources.filter((x) => x.type === 'note' && x.chapterId && x.chapterId === r.chapterId);
     body = `<div style="display:flex;flex-direction:column;gap:14px"><div id="viewer-slot"></div>
-      <label class="drop" data-drop="${r.id}" for="file-${r.id}">${ic('upload')}<span><b>${r.fileId ? 'Replace the PDF' : 'Drop a PDF here'}</b> or click to choose. It stays on this computer.</span>
+      <label class="drop" data-drop="${r.id}" for="file-${r.id}">${ic('upload')}<span><b>${LOST.has(r.id) ? 'The file is missing. Drop it here again' : r.fileId ? 'Replace the PDF' : 'Drop a PDF here'}</b> or click to choose. It stays on this computer.</span>
         <input type="file" id="file-${r.id}" accept="application/pdf,image/*${r.type === 'book' || r.type === 'textbook' ? ',.epub,application/epub+zip' : ''}" data-change="r-file" data-id="${r.id}" hidden></label>
       ${r.fileId ? `<button class="btn ghost" data-act="r-file-del" data-id="${r.id}" style="align-self:flex-start">${ic('trash')} Remove uploaded file</button>` : ''}
       ${linkedNotes.length ? `<h2>Your notes on this chapter</h2><div style="display:flex;gap:8px;flex-wrap:wrap">${linkedNotes.map((n) => `<a class="btn" href="#/r/${n.id}">${ic('note')} ${esc(n.title)}</a>`).join('')}</div>` : ''}</div>`;
@@ -1782,9 +1786,10 @@ function settingsView() {
       </div></details></div>
 
     <div class="sec"><h2>Your data</h2>
-      <p class="muted" style="margin:0;max-width:65ch">Everything is saved in this browser on this computer. Uploaded PDFs and backgrounds stay here too and aren’t part of the backup file.</p>
+      <p class="muted" style="margin:0;max-width:65ch">Everything is saved in this browser on this computer. A backup is a .zip with your notes and settings plus your books, slides and uploaded pictures, so keep one somewhere safe. Browsers can clear their stored files when the disk runs low.</p>
+      <div class="store-status" id="store-status"><small class="muted">Checking storage…</small></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-act="export">Export backup</button>
-        <label class="btn" for="import-file">Import backup</label><input type="file" id="import-file" accept="application/json" data-change="import" hidden>
+        <label class="btn" for="import-file">Import backup</label><input type="file" id="import-file" accept=".zip,application/zip,application/json,.json" data-change="import" hidden>
         ${hasExamples() ? '<button class="btn" data-act="clear-examples">Clear example data</button>' : ''}${(() => { try { return localStorage.getItem(BACKUP_KEY) ? '<button class="btn" data-act="restore-cleanup">Undo example cleanup</button>' : ''; } catch { return ''; } })()}<button class="btn danger" data-act="reset-all">Start over</button></div></div>
   </div>`;
 }
@@ -1844,7 +1849,7 @@ function setupView() {
     { done: S.lectures.length > 0, title: 'Lecture times', body: subjects.length ? `<div class="setup-list">${subjects.map((x) => `<div class="setup-row"><i style="background:${esc(x.color)}"></i><b>${esc(x.name)}</b><small>${lecOf(x.id).map((l) => `${l.days.map((d) => DOW[d]).join(' ')} ${fmtTime(l.start)}`).join(' · ') || 'No times yet'}</small><button class="btn sm" data-act="lecture-new" data-subject="${x.id}">${ic('plus')} Time</button></div>`).join('')}</div>` : '<p class="setup-hint">Add a subject first.</p>' },
     { done: S.due.length > 0, title: 'What’s due', body: `${S.due.filter((d) => !d.done).slice(0, 4).map((d) => `<div class="setup-row"><b>${esc(d.title)}</b><small>${relDate(d.date)}</small></div>`).join('')}<button class="btn" data-act="due-new">${ic('plus')} Add a deadline</button>` },
     { done: !!st.styleChosen, title: 'Pick a look', body: `${styleCardsHTML()}<p class="setup-hint">Backgrounds are in Settings. The accent colour follows whichever you choose.</p>` },
-    { done: S.resources.length > 0, title: 'Notes, textbooks and slides', body: `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="res-new" data-type="note">${ic('note')} Write a note</button><button class="btn" data-act="res-new" data-type="textbook">${ic('book')} Add a textbook</button><button class="btn" data-act="res-new" data-type="slides">${ic('slides')} Add slides</button></div>
+    { done: S.resources.length > 0, title: 'Notes, textbooks and slides', body: `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-act="imp-open">${ic('upload')} Import files or a folder</button><button class="btn" data-act="res-new" data-type="note">${ic('note')} Write a note</button><button class="btn" data-act="res-new" data-type="textbook">${ic('book')} Add a textbook</button><button class="btn" data-act="res-new" data-type="slides">${ic('slides')} Add slides</button></div>
       <p class="setup-hint">Textbooks and slides can be a PDF from your computer or a link. ${S.resources.length ? `You have ${S.resources.length} so far.` : ''}</p>` },
   ];
   const doneN = steps.filter((x) => x.done).length;
@@ -2187,12 +2192,14 @@ const ACTS = {
   style: (el) => { S.settings.style = el.dataset.v; S.settings.styleChosen = true; save(); applySettings(); render(); },
   'chime-test': () => { const c = S.settings.chime; S.settings.chime = true; chime(); S.settings.chime = c; },
   'notify-perm': async () => { try { const p = await Notification.requestPermission(); toast(p === 'granted' ? 'Notifications on' : 'Notifications are blocked in this browser'); } catch { toast('This browser doesn’t support notifications'); } },
-  export: () => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' }));
-    a.download = `study-haven-backup-${todayISO()}.json`; a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  export: async () => {
+    try {
+      const { files, size } = await BK.exportBackup((m) => toast(m));
+      toast(`Backup saved: ${files} stored file${files === 1 ? '' : 's'}, ${size > 1048576 ? `${Math.round(size / 1048576)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`}`);
+      if (route().name === 'settings') render();
+    } catch (e) { console.warn(e); toast('Couldn’t make the backup. The library may be too big for the browser to pack.'); }
   },
+  'protect-storage': async () => { toast((await BK.protectStorage()) ? 'Your library is now protected' : 'The browser said no for now. It often says yes once you use the app regularly.'); BK.paintStatus(esc); },
   'clear-examples': () => confirmBox('Remove all the example subjects, notes and deadlines?', 'Clear examples', () => { clearExamples(); toast('Examples cleared'); }),
   'reset-all': () => confirmBox('Erase everything and start with an empty app?', 'Erase everything', () => { startOver(); applySettings(); render(); }),
   'restore-cleanup': () => confirmBox('Put back everything as it was before the example data was removed? Changes since then will be lost.', 'Put it back', () => { if (restoreBeforeCleanup()) { applySettings(); render(); toast('Restored'); } }),
@@ -2240,11 +2247,13 @@ const CHANGES = {
     if (['bgSame', 'stickers', 'quotes', 'clock24', 'appName', 'userName'].includes(k)) render();
   },
   import: async (el) => {
+    const f = el.files[0]; el.value = '';
+    if (!f) return;
     try {
-      const data = JSON.parse(await el.files[0].text());
-      if (!data.subjects || !data.settings) throw new Error('not a backup');
-      replaceAll(data); applySettings(); render(); toast('Backup restored');
-    } catch { toast('That file isn’t a FOKUS backup'); }
+      const { files, lost } = await BK.restoreBackup(f, (m) => toast(m));
+      applySettings(); render();
+      toast(`Backup restored${files ? ` with ${files} stored file${files === 1 ? '' : 's'}` : ''}${lost ? `. ${lost} book${lost === 1 ? ' needs its file' : 's need their files'} again` : ''}`);
+    } catch (e) { console.warn(e); toast('That file isn’t a FOKUS backup'); }
   },
   'bg-upload': async (el) => {
     const f = el.files[0];
@@ -2268,7 +2277,7 @@ async function uploadFile(r, file) {
   const id = r.fileId || uid();
   try {
     await putFile(id, file);
-    r.fileId = id; r.fileName = file.name; r.updated = Date.now();
+    r.fileId = id; r.fileName = file.name; r.size = file.size; r.updated = Date.now(); LOST.delete(r.id);
     r.format = /\.epub$/i.test(file.name) ? 'epub' : 'pdf';
     if (!r.title) r.title = file.name.replace(/\.(pdf|epub)$/i, '');
     save(); render(); toast('File saved on this computer');
@@ -2347,15 +2356,16 @@ document.addEventListener('fullscreenchange', () => { br.innerHTML = brHTML(); }
 view.addEventListener('scroll', () => { const l = $('#sticker-layer', view); if (l) l.style.height = `${view.scrollHeight}px`; }, { passive: true });
 
 // ---------------------------------------------------------------- boot
-const LIB = initLibrary({ esc, ic, toast, render, openForm, subjOpts });
-Object.assign(ACTS, ACTS_EXTRA, ROOM_ACTS, LIB.ACTS);
+const LIB = initLibrary({ esc, ic, toast, render, openForm, subjOpts, showModal: (html) => { modal.innerHTML = html; modal.hidden = false; modalDelete = null; }, closeModal });
+const IMP = initImport({ esc, ic, toast, render, closeModal });
+Object.assign(ACTS, ACTS_EXTRA, ROOM_ACTS, LIB.ACTS, IMP.ACTS);
 Object.assign(CHANGES, CHANGES_EXTRA, LIB.CHANGES);
 const VIEWS = { setup: setupView, studio: studioView, today: todayView, subjects: subjectsView, subject: subjectView, library: libraryView, shelf: () => LIB.shelfView(), resource: resourceView, calendar: calendarView, courses: coursesView, settings: settingsView };
 // ---------------------------------------------------------------- updates
 // GitHub Pages lets browsers keep files for 10 minutes, so friends could end up on different
 // versions. When version.json online is newer than this copy, re-download every file into the
 // browser cache and reload, so everyone runs the same thing.
-const APP_FILES = ['./', 'index.html', 'styles.css', 'version.json', 'sw.js', ...['app', 'store', 'md', 'player', 'sounds', 'together', 'room', 'visualiser', 'version', 'avatar', 'scenes', 'library', 'bookshare'].map((f) => `js/${f}.js`)];
+const APP_FILES = ['./', 'index.html', 'styles.css', 'version.json', 'sw.js', ...['app', 'store', 'md', 'player', 'sounds', 'together', 'room', 'visualiser', 'version', 'avatar', 'scenes', 'library', 'bookshare', 'import', 'backup'].map((f) => `js/${f}.js`)];
 let updating = false;
 async function checkForUpdate() {
   if (updating || location.hostname === 'localhost') return;
@@ -2388,6 +2398,8 @@ applySettings();
 SND.setMuted(S.settings.catSounds === false);
 VIZ.mountStage($('#viz'), () => ({ style: S.settings.visualiser || 'bars', hidden: ui.mode === 'room', musicPlaying: YT.P.playing, accent: effectiveAccent() }));
 render();
+// did the browser clear any stored files? Then say so, and show which books need theirs again
+checkFiles().then((n) => { if (n) { render(); toast(`${n} book${n === 1 ? ' has' : 's have'} lost ${n === 1 ? 'its' : 'their'} file. Open the Bookshelf to fix that.`); } else BK.nudge(toast); });
 {
   // an invite link: join straight away if we know your name, otherwise ask for it first
   const code = new URLSearchParams(location.search).get('room');

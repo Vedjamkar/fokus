@@ -19,6 +19,21 @@ A walnut bookcase with your textbooks and the books you read for fun.
 - **Reading**: a book opens closed, showing its cover, then the cover lifts and it turns to where you left off. PDFs turn with real page curls (drag a corner, click, swipe or use the arrow keys). EPUBs are laid out across two pages. The page stacks on either side thin out as you read; bookmark a page with the tag button.
 - PDF.js, epub.js and StPageFlip load only when you open or add a book. Books stay on this computer.
 
+## Importing your study materials
+
+The **Import** button (Bookshelf, Textbooks, Slides, Notes and the setup page) opens one dialog for everything. You can also drop files or a whole folder anywhere in the library and the dialog opens by itself.
+- **What it takes**: PDF and EPUB (kept as files and shelved), Word `.docx` and PowerPoint `.pptx` (their text becomes an editable note), Markdown and text files (notes), images (slides), and pasted links (Google Slides, Drive, course pages). Older `.doc` and `.ppt` files should be saved as PDF first.
+- **It sorts for you**: each item is given a type and a subject before you confirm. Names like "Week 3 Lecture" and PDFs with landscape pages become slides; the subject comes from the file name and folder name. The review list lets you rename, change the type or subject, or leave an item out, and *Put everything in* files the lot under one subject.
+- **Nothing is imported twice**: a file with the same name and size is skipped. Files stay on this computer.
+
+## Keeping your library safe
+
+Books and uploads are stored in the browser (IndexedDB), and a browser can clear them when the disk runs low.
+- **Persistent storage** is requested after your first import. Settings → Your data shows whether it was granted, and has a *Protect my library* button to ask again.
+- **Backups are a .zip** holding your data plus every stored file (books, covers, slides, pictures). *Import backup* restores a .zip, or an older .json backup (data only).
+- **Missing files are noticed.** If the browser cleared any, the Bookshelf and Library pages list the books that need their file again; open one and drop the file back in, or restore a backup.
+- A reminder to back up appears at most every two weeks when you have books and no recent backup.
+
 ## The study room (Room mode, cube icon)
 
 A 3D isometric study room you can orbit around. Every object is part of the app:

@@ -265,6 +265,18 @@ const tx = async (mode, fn) => {
 export const putFile = (id, blob) => tx('readwrite', (st) => st.put(blob, id));
 export const getFile = (id) => tx('readonly', (st) => st.get(id));
 export const delFile = (id) => tx('readwrite', (st) => st.delete(id));
+export const fileKeys = () => tx('readonly', (st) => st.getAllKeys());
+
+// The browser may clear IndexedDB on its own (low disk space, "clear site data"), which leaves books
+// on the shelf with no file behind them. LOST holds the ids of those resources.
+export const LOST = new Set();
+export async function checkFiles() {
+  let keys;
+  try { keys = new Set(await fileKeys()); } catch { return LOST.size; } // storage unavailable: don't cry wolf
+  LOST.clear();
+  for (const r of S.resources) if (r.fileId && !keys.has(r.fileId)) LOST.add(r.id);
+  return LOST.size;
+}
 
 // ---------- example notes ----------
 const NOTE_EIGEN = `# Eigenvalues — the big picture

@@ -18,13 +18,25 @@ export const lent = (r) => !!r.lent && !!r.fileId && !r.borrowed;
 const me = () => TGM.TG.me?.id;
 
 // ---------------------------------------------------------------- the owner's side
+async function meta(r) {
+  const size = (await getFile(r.fileId).catch(() => null))?.size || 0;
+  return size && size <= MAX ? { id: r.id, title: r.title || 'Untitled', author: r.author || '', type: r.type, format: r.format || (/\.epub$/i.test(r.fileName || '') ? 'epub' : 'pdf'), pages: r.pages || 0, size, spine: H.color(r) } : null;
+}
 async function catalog() {
   const list = [];
-  for (const r of S.resources.filter(lent).slice(0, 60)) {
-    const size = (await getFile(r.fileId).catch(() => null))?.size || 0;
-    if (size && size <= MAX) list.push({ id: r.id, title: r.title || 'Untitled', author: r.author || '', type: r.type, format: r.format || (/\.epub$/i.test(r.fileName || '') ? 'epub' : 'pdf'), pages: r.pages || 0, size, spine: H.color(r) });
-  }
+  for (const r of S.resources.filter(lent).slice(0, 60)) { const m = await meta(r); if (m) list.push(m); }
   return list;
+}
+// Send one book to one friend. It lands on their room shelf, from you, and they take it when they like.
+const offers = new Set(); // `${friend}:${book}`: books you've sent, which that friend may fetch even if you aren't lending them
+export async function sendBook(r, to) {
+  if (TGM.TG.status !== 'on' || !TGM.TG.members.has(to)) return H.toast('That friend isn’t in the room any more');
+  if (!TGM.canCarryBooks()) return H.toast('Your network blocks the servers books travel through. A phone hotspot usually works.');
+  const m = r.fileId && !r.borrowed && await meta(r);
+  if (!m) return H.toast('That book’s file is missing or too big to send (60 MB at most)');
+  offers.add(`${to}:${r.id}`);
+  TGM.book({ t: 'book-offer', to, book: m });
+  H.toast(`Sent “${m.title}” to ${TGM.TG.members.get(to)?.name || 'a friend'}. It shows on their room shelf.`);
 }
 let announceT = 0;
 function announce(soon) {
@@ -39,7 +51,7 @@ export function toggleLend(r) {
 
 const sending = new Set();
 async function serve(id, to, need) {
-  const r = S.resources.find((x) => x.id === id && lent(x));
+  const r = S.resources.find((x) => x.id === id && (lent(x) || (offers.has(`${to}:${id}`) && x.fileId && !x.borrowed)));
   const blob = r && (await getFile(r.fileId).catch(() => null));
   if (!blob || blob.size > MAX) return TGM.book({ t: 'book-none', to, id });
   const key = `${to}:${id}`;
@@ -62,18 +74,23 @@ const b64 = (blob) => new Promise((res, rej) => { const f = new FileReader(); f.
 
 // ---------------------------------------------------------------- everyone else's side
 const shelves = new Map(); // member id → the books they lend
+const sent = new Map(); // member id → books they sent just to you
 const loans = new Map(); // `${owner}:${id}` → a book on its way to you
 const str = (v, n) => String(v ?? '').slice(0, n);
 // friends still in the room, with what they lend
 export function friendShelves() {
-  return [...shelves].filter(([id, list]) => id !== me() && list.length && TGM.TG.members.has(id))
-    .map(([id, list]) => ({ member: TGM.TG.members.get(id), list }));
+  const ids = new Set([...shelves.keys(), ...sent.keys()]);
+  return [...ids].filter((id) => id !== me() && TGM.TG.members.has(id))
+    .map((id) => {
+      const mine = shelves.get(id) || [], extra = (sent.get(id) || []).filter((b) => !mine.some((x) => x.id === b.id));
+      return { member: TGM.TG.members.get(id), list: [...extra, ...mine] };
+    }).filter((f) => f.list.length);
 }
 export const loanOf = (owner, id) => loans.get(`${owner}:${id}`);
 const copyOf = (id) => S.resources.find((r) => r.borrowed?.src === id);
 
 export function borrow(owner, id) {
-  const b = shelves.get(owner)?.find((x) => x.id === id);
+  const b = shelves.get(owner)?.find((x) => x.id === id) || sent.get(owner)?.find((x) => x.id === id);
   if (!b) return H.toast('That book isn’t on the room shelf any more');
   const have = copyOf(id);
   if (have) { location.hash = `#/read/${have.id}`; return; }
@@ -129,17 +146,28 @@ setInterval(() => {
   }
 }, 1500);
 
+const clean = (b) => {
+  if (!b || typeof b.id !== 'string') return null;
+  const o = { id: str(b.id, 40), title: str(b.title, 160) || 'Untitled', author: str(b.author, 100), type: b.type === 'textbook' ? 'textbook' : 'book',
+    format: b.format === 'epub' ? 'epub' : 'pdf', pages: Math.max(0, Math.min(5000, +b.pages || 0)), size: Math.max(0, +b.size || 0), spine: /^[#\w(),.%\s-]{1,80}$/.test(b.spine || '') ? b.spine : '' };
+  return o.size && o.size <= MAX ? o : null;
+};
 TGM.onBook((m) => {
   if (m.t === 'book-hello') { if (S.resources.some(lent)) announce(!m.from); return; }
   if (m.t === 'books' && Array.isArray(m.list)) {
-    shelves.set(m.from, m.list.slice(0, 60).filter((b) => b && typeof b.id === 'string').map((b) => ({
-      id: str(b.id, 40), title: str(b.title, 160) || 'Untitled', author: str(b.author, 100), type: b.type === 'textbook' ? 'textbook' : 'book',
-      format: b.format === 'epub' ? 'epub' : 'pdf', pages: Math.max(0, Math.min(5000, +b.pages || 0)), size: Math.max(0, +b.size || 0), spine: /^[#\w(),.%\s-]{1,80}$/.test(b.spine || '') ? b.spine : '',
-    })).filter((b) => b.size && b.size <= MAX));
+    shelves.set(m.from, m.list.slice(0, 60).map(clean).filter(Boolean));
     if (H.onRoute('shelf')) H.render();
     return;
   }
   if (m.to !== me()) return; // pieces and requests meant for someone else
+  if (m.t === 'book-offer') {
+    const b = clean(m.book); if (!b) return;
+    const list = sent.get(m.from) || [];
+    if (!list.some((x) => x.id === b.id)) sent.set(m.from, [b, ...list].slice(0, 20));
+    H.toast(`${TGM.TG.members.get(m.from)?.name || 'A friend'} sent you “${b.title}”. It’s on the room shelf. Tap it to take a copy.`);
+    if (H.onRoute('shelf')) H.render();
+    return;
+  }
   if (m.t === 'book-req' && typeof m.id === 'string') serve(m.id, m.from, m.need);
   if (m.t === 'book-part') collect(m);
   if (m.t === 'book-none') { const L = loans.get(`${m.from}:${m.id}`); if (L) fail(L, m.why === 'net' ? 'The lender’s network can’t send books right now' : `“${L.b.title}” isn’t being lent any more`); }
@@ -147,7 +175,7 @@ TGM.onBook((m) => {
 // when someone leaves, their shelf goes with them; when you leave, all of them do
 let seenShelves = '';
 TGM.onChange(() => {
-  if (TGM.TG.status !== 'on') shelves.clear();
+  if (TGM.TG.status !== 'on') { shelves.clear(); sent.clear(); offers.clear(); }
   const now = TGM.TG.status + friendShelves().map((f) => f.member.id).join();
   if (now !== seenShelves) { seenShelves = now; if (H.onRoute('shelf')) H.render(); }
 });
