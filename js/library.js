@@ -135,6 +135,7 @@ function shelfView() {
   return `<div class="page wide shelf-page">
     <div class="ph-row"><div class="ph"><h1>Bookshelf</h1><p>Drop a PDF or EPUB on a shelf and it’s ready to read. Drag books between shelves to sort them.</p></div>
       <button class="btn primary" data-act="imp-open">${ic('upload')} Import</button>
+      <button class="btn" data-act="lib-share-pick">${ic('users')} Share a book</button>
       <button class="btn" data-act="shelf-new">${ic('plus')} New shelf</button>
       <button class="btn" data-act="res-new" data-type="textbook">${ic('link')} Textbook from a link</button></div>
     ${lostBanner()}
@@ -747,6 +748,14 @@ const ACTS = {
     borrow(el.dataset.owner, el.dataset.id);
   },
   'lib-lend': (el) => { const r = S.resources.find((x) => x.id === el.dataset.id); if (r) shareSheet(r); },
+  'lib-share-pick': () => {
+    const { esc } = D;
+    const mine = S.resources.filter((r) => isBook(r) && r.fileId && !r.borrowed && !LOST.has(r.id));
+    D.showModal(`<div class="modal-box" role="dialog" aria-modal="true" aria-label="Share a book"><h3>Share a book</h3>
+      ${mine.length ? `<p class="muted" style="margin:0">Pick one to lend to your study room or send to a friend.</p>${mine.map((r) => `<div class="share-row"><div><b>${esc(r.title || 'Untitled')}</b><small>${esc(r.author || (r.type === 'textbook' ? 'Textbook' : 'Book'))}${lent(r) ? ' · lent to the room' : ''}</small></div><button class="btn" data-act="lib-lend" data-id="${r.id}">Share</button></div>`).join('')}`
+        : '<p class="muted" style="margin:0">Add a PDF or EPUB to a shelf first. Books without a file can’t be shared.</p>'}
+      <div class="acts"><button class="btn ghost" data-act="m-close">Done</button></div></div>`);
+  },
   'lib-lend-toggle': (el) => { const r = S.resources.find((x) => x.id === el.dataset.id); if (r) { toggleLend(r); D.render(); shareSheet(r); } },
   'lib-send': (el) => { const r = S.resources.find((x) => x.id === el.dataset.id); if (r) { sendBook(r, el.dataset.to); D.closeModal(); } },
   'rd-turn': (el) => turn(+el.dataset.d),
