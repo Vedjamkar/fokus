@@ -363,7 +363,7 @@ export async function mountRoom(host, opts) {
   sheet.add(at(box(1.62, 1.99, 0.05, mat(0xd8d6d0, { roughness: 0.5 }), 0.02), 0, 0, 0));
   sheet.add(at(box(1.5, 0.06, 0.16, easelWood, 0.01), 0, -1.0, 0.08)); // marker tray
   sheet.add(at(cyl(0.025, 0.025, 0.26, mat(0x2f6fd8), 8).rotateZ(Math.PI / 2), 0.35, -0.95, 0.1));
-  for (const [x, z, tilt] of [[-0.85, -0.16, -0.07], [0.85, -0.16, 0.07]]) { const leg = cyl(0.04, 0.04, 3.9, easelWood, 8); at(leg, x, 1.9, z); leg.rotation.z = tilt; leg.rotation.x = -0.1; easel.add(leg); }
+  for (const [x, z, tilt] of [[-1.3, -0.1, -0.03], [1.3, -0.1, 0.03]]) { const leg = cyl(0.04, 0.04, 3.9, easelWood, 8); at(leg, x, 1.9, z); leg.rotation.z = tilt; leg.rotation.x = -0.1; easel.add(leg); }
   const back = cyl(0.04, 0.04, 3.6, easelWood, 8); at(back, 0, 1.8, -0.5); back.rotation.x = 0.3; easel.add(back);
   scene.add(pick(easel, 'tasks'));
 
